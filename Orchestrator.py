@@ -110,7 +110,7 @@ def main():
     # Step 7: Save chunks to CSV
     print("\n Step 7: Saving chunks...")
     chunks_saved = csv_manager.save_chunks(
-        file_id=file_id, chunk_ids=chunk_ids, chunks=chunks
+        file_id=file_id, chunk_ids=chunk_ids, chunks=evaluated_chunks
     )
 
     if chunks_saved:
@@ -215,7 +215,7 @@ def main():
 def batch_process():
     """Process multiple files in batch."""
 
-    print("📦 BATCH PROCESSING MODE")
+    print(" BATCH PROCESSING MODE")
     print("=" * 80)
 
     # Get file paths
@@ -309,7 +309,7 @@ def batch_process():
 
     # Summary
     print("\n" + "=" * 80)
-    print("📊 BATCH PROCESSING SUMMARY")
+    print(" BATCH PROCESSING SUMMARY")
     print("=" * 80)
     print(f"Total files: {len(file_paths)}")
     print(f"Successful: {successful}")
