@@ -133,6 +133,7 @@ class CSVManager:
             for idx, (chunk_id, chunk) in enumerate(zip(chunk_ids, chunks)):
                 content = chunk.get("content", "")
                 meta = chunk.get("metadata", {})
+                evaluation = chunk.get("evaluation", {})  # Get evaluation data
 
                 row = {
                     "chunk_id": chunk_id,
@@ -149,6 +150,11 @@ class CSVManager:
                     if idx < len(chunk_ids) - 1
                     else "",
                     "created_at": datetime.now().isoformat(),
+                    # Add evaluation fields
+                    "quality_score": evaluation.get("quality_score", ""),
+                    "eval_content_type": evaluation.get("content_type", ""),
+                    "eval_reason": evaluation.get("reason", ""),
+                    "should_use": evaluation.get("should_use", True),
                 }
 
                 rows.append(row)
