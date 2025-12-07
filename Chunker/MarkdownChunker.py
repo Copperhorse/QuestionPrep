@@ -1,7 +1,7 @@
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 try:
     import tiktoken
@@ -9,12 +9,23 @@ try:
     TIKTOKEN_AVAILABLE = True
 except ImportError:
     TIKTOKEN_AVAILABLE = False
-    print("Warning: tiktoken not available, using word-based approximation")
+
+try:
+    from langchain_text_splitters import (
+        MarkdownHeaderTextSplitter,
+        RecursiveCharacterTextSplitter,
+    )
+
+    LANGCHAIN_AVAILABLE = True
+except ImportError:
+    LANGCHAIN_AVAILABLE = False
 
 
-# -------------------------------------------------------------------
-# Token counter
-# -------------------------------------------------------------------
+# ============================================================
+# TOKEN COUNTING
+# ============================================================
+
+
 def count_tokens(text: str) -> int:
     """Count tokens using tiktoken if available, otherwise approximate."""
     if TIKTOKEN_AVAILABLE:
@@ -23,401 +34,558 @@ def count_tokens(text: str) -> int:
             return len(enc.encode(text))
         except Exception:
             pass
-    # Fallback: approximate tokens as 1.3x words for technical text
     return max(1, int(len(text.split()) * 1.3))
 
 
-# -------------------------------------------------------------------
-# Content type detection
-# -------------------------------------------------------------------
+# ============================================================
+# CONTENT TYPES
+# ============================================================
+
+
 class ContentType(Enum):
     CODE = "code"
+    MATH = "math"
+    TABLE = "table"
     PROSE = "prose"
-    MIXED = "mixed"
 
 
 @dataclass
 class ContentBlock:
-    """Represents a block of content with its type and boundaries."""
-
     content: str
     type: ContentType
     start_idx: int
     end_idx: int
 
 
+# ============================================================
+# BLOCK DETECTION
+# ============================================================
+
+
 def detect_content_blocks(text: str) -> List[ContentBlock]:
     """
-    Detect code blocks and prose sections in markdown text.
-    Returns list of ContentBlock objects preserving order.
+    Detect code, math, table, and prose blocks inside markdown text.
     """
     blocks = []
-    code_pattern = r"```[\s\S]*?```"
+    patterns = []
+
+    # Code blocks
+    code_pat = r"```[\s\S]*?```"
+    patterns.append((code_pat, ContentType.CODE))
+
+    # Math $$...$$
+    math_pat = r"\$\$[\s\S]*?\$\$"
+    patterns.append((math_pat, ContentType.MATH))
+
+    # Math \[ ... \]
+    math_bracket_pat = r"\\\[[\s\S]*?\\\]"
+    patterns.append((math_bracket_pat, ContentType.MATH))
+
+    # Math environments
+    env_pat = r"\\begin\{(equation|align|gather|multline)\}[\s\S]*?\\end\{\1\}"
+    patterns.append((env_pat, ContentType.MATH))
+
+    # Tables
+    table_pat = (
+        r"(?:^\|.*\|\s*\n"  # header
+        r"^\|[-: ]+\|\s*\n"  # separator
+        r"(?:^\|.*\|\s*\n)+)"  # body rows
+    )
+    patterns.append((table_pat, ContentType.TABLE))
+
+    # Collect matches
+    matches = []
+    for pat, typ in patterns:
+        for m in re.finditer(pat, text, re.MULTILINE):
+            matches.append((m.start(), m.end(), m.group(0), typ))
+
+    matches.sort(key=lambda x: x[0])
 
     last_end = 0
-    for match in re.finditer(code_pattern, text):
-        start, end = match.span()
-
-        # Add prose before this code block
+    for start, end, content, typ in matches:
         if start > last_end:
             prose = text[last_end:start].strip()
             if prose:
-                blocks.append(
-                    ContentBlock(
-                        content=prose,
-                        type=ContentType.PROSE,
-                        start_idx=last_end,
-                        end_idx=start,
-                    )
-                )
+                blocks.append(ContentBlock(prose, ContentType.PROSE, last_end, start))
 
-        # Add code block
-        blocks.append(
-            ContentBlock(
-                content=match.group(0),
-                type=ContentType.CODE,
-                start_idx=start,
-                end_idx=end,
-            )
-        )
+        blocks.append(ContentBlock(content, typ, start, end))
         last_end = end
 
-    # Add remaining prose after last code block
     if last_end < len(text):
         prose = text[last_end:].strip()
         if prose:
-            blocks.append(
-                ContentBlock(
-                    content=prose,
-                    type=ContentType.PROSE,
-                    start_idx=last_end,
-                    end_idx=len(text),
-                )
-            )
+            blocks.append(ContentBlock(prose, ContentType.PROSE, last_end, len(text)))
 
-    # If no code blocks found, treat entire text as prose
     if not blocks:
-        blocks.append(
-            ContentBlock(
-                content=text, type=ContentType.PROSE, start_idx=0, end_idx=len(text)
-            )
-        )
+        blocks.append(ContentBlock(text, ContentType.PROSE, 0, len(text)))
 
     return blocks
 
 
-# -------------------------------------------------------------------
-# Smart splitting functions
-# -------------------------------------------------------------------
-def split_code_block(code: str, max_tokens: int) -> List[str]:
-    """
-    Split code block intelligently, trying to preserve complete functions.
-    Only splits if absolutely necessary.
-    """
-    # If it fits, return as-is
-    if count_tokens(code) <= max_tokens:
-        return [code]
-
-    chunks = []
-
-    # Try to extract code fence markers
-    fence_match = re.match(r"^(```\w*\n)([\s\S]*?)(```\s*)$", code)
-    if fence_match:
-        opening, code_content, closing = fence_match.groups()
-    else:
-        opening, code_content, closing = "", code, ""
-
-    # Split by function definitions (def, class, etc.)
-    function_pattern = r"(^(?:def|class|async def)\s+\w+.*?:\n(?:(?!^(?:def|class|async def)\s+\w+).*\n)*)"
-    functions = re.findall(function_pattern, code_content, re.MULTILINE)
-
-    if functions:
-        # Split by functions
-        current_chunk = opening
-
-        for func in functions:
-            test_chunk = current_chunk + func
-            if (
-                count_tokens(test_chunk + closing) > max_tokens
-                and current_chunk != opening
-            ):
-                # Save current chunk and start new one
-                chunks.append(current_chunk + closing)
-                current_chunk = opening + func
-            else:
-                current_chunk = test_chunk
-
-        if current_chunk != opening:
-            chunks.append(current_chunk + closing)
-    else:
-        # Fallback: split by lines, trying to keep logical groups
-        lines = code_content.split("\n")
-        current_chunk = opening
-
-        for line in lines:
-            test_chunk = current_chunk + line + "\n"
-            if (
-                count_tokens(test_chunk + closing) > max_tokens
-                and current_chunk != opening
-            ):
-                chunks.append(current_chunk + closing)
-                current_chunk = opening + line + "\n"
-            else:
-                current_chunk = test_chunk
-
-        if current_chunk != opening:
-            chunks.append(current_chunk + closing)
-
-    return chunks if chunks else [code]
+# ============================================================
+# SPECIALIZED BLOCK SPLITTING
+# ============================================================
 
 
-def split_prose_by_sentences(text: str, max_tokens: int) -> List[str]:
-    """Split prose by sentences, respecting token limits."""
-    # Improved sentence splitting that handles abbreviations better
-    sentence_pattern = r"(?<=[.!?])\s+(?=[A-Z])"
-    sentences = re.split(sentence_pattern, text.strip())
+def split_math_block(math: str, max_tokens: int) -> List[str]:
+    """Keep entire math block intact whenever possible."""
+    if count_tokens(math) <= max_tokens:
+        return [math]
 
-    chunks = []
-    current = ""
+    lines = math.split("\n")
+    chunks, current = [], ""
 
-    for sentence in sentences:
-        test_chunk = (current + " " + sentence).strip()
-
-        if count_tokens(test_chunk) > max_tokens:
-            if current:
-                chunks.append(current.strip())
-            current = sentence
+    for line in lines:
+        test = current + line + "\n"
+        if count_tokens(test) > max_tokens and current:
+            chunks.append(current)
+            current = line + "\n"
         else:
-            current = test_chunk
+            current = test
 
     if current:
-        chunks.append(current.strip())
-
-    return chunks if chunks else [text]
-
-
-def split_by_paragraphs(text: str, max_tokens: int) -> List[str]:
-    """Split text by paragraphs first, then by sentences if needed."""
-    paragraphs = re.split(r"\n\s*\n", text)
-    chunks = []
-
-    for para in paragraphs:
-        para = para.strip()
-        if not para:
-            continue
-
-        if count_tokens(para) <= max_tokens:
-            chunks.append(para)
-        else:
-            # Paragraph too large, split by sentences
-            chunks.extend(split_prose_by_sentences(para, max_tokens))
+        chunks.append(current)
 
     return chunks
 
 
-# -------------------------------------------------------------------
-# Configuration
-# -------------------------------------------------------------------
+def split_table_block(table: str, max_tokens: int) -> List[str]:
+    """Keep table intact or split by row groups if extremely large."""
+    if count_tokens(table) <= max_tokens:
+        return [table]
+
+    lines = table.strip().split("\n")
+    if len(lines) < 3:
+        return [table]
+
+    header = lines[0]
+    separator = lines[1]
+    body = lines[2:]
+
+    chunks = []
+    current = [header, separator]
+
+    for row in body:
+        test = "\n".join(current + [row])
+        if count_tokens(test) > max_tokens and len(current) > 2:
+            chunks.append("\n".join(current))
+            current = [header, separator, row]
+        else:
+            current.append(row)
+
+    if current:
+        chunks.append("\n".join(current))
+    return chunks
+
+
+def split_code_block(code: str, max_tokens: int) -> List[str]:
+    """Split code block by lines, preserving syntax structure."""
+    if count_tokens(code) <= max_tokens:
+        return [code]
+
+    chunks, current = [], ""
+    for line in code.split("\n"):
+        test = current + line + "\n"
+        if count_tokens(test) > max_tokens and current:
+            chunks.append(current)
+            current = line + "\n"
+        else:
+            current = test
+
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+# ============================================================
+# CONFIG
+# ============================================================
+
+
 @dataclass
 class ChunkConfig:
     max_chunk_tokens: int = 300
     min_chunk_tokens: int = 50
     preserve_code_blocks: bool = True
     merge_short_chunks: bool = True
+    use_recursive_splitter: bool = True  # NEW: Enable recursive splitting
 
 
-# -------------------------------------------------------------------
-# Main Chunker
-# -------------------------------------------------------------------
-class MarkdownChunker:
+# ============================================================
+# MAIN CHUNKER WITH BOTH APPROACHES
+# ============================================================
+
+
+class HybridMarkdownChunker:
     """
-    Content-aware chunker that:
-    - Preserves code blocks
-    - Splits intelligently by content type
-    - Maintains header context
-    - Merges short chunks smartly
+    Supports both:
+    1. Numeric headers (2.1.3 Title) - original approach
+    2. Standard markdown headers (# ## ###) - via MarkdownHeaderTextSplitter
+    3. Recursive splitting for prose - intelligently splits long text
     """
 
     def __init__(self, config: Optional[ChunkConfig] = None):
         self.config = config or ChunkConfig()
 
-    def process(self, markdown_text: str) -> List[Dict[str, Any]]:
-        """Main entry point for chunking."""
-        sections = self._split_by_headers(markdown_text)
-        chunks = self._process_sections(sections)
+        # Initialize LangChain splitters if available
+        if LANGCHAIN_AVAILABLE:
+            self.header_splitter = MarkdownHeaderTextSplitter(
+                headers_to_split_on=[
+                    ("#", "Header 1"),
+                    ("##", "Header 2"),
+                    ("###", "Header 3"),
+                ],
+                strip_headers=False,
+            )
 
-        if self.config.merge_short_chunks:
-            chunks = self._merge_short_chunks(chunks)
+            # Recursive splitter for prose content
+            self.recursive_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=self.config.max_chunk_tokens * 4,  # Approximate chars
+                chunk_overlap=50,
+                length_function=count_tokens,
+                separators=["\n\n", "\n", ". ", " ", ""],
+            )
+        else:
+            self.header_splitter = None
+            self.recursive_splitter = None
 
-        chunks = self._assign_chunk_indices(chunks)
-        return chunks
+    # ------------------------------------------------------------
+    # NUMERIC HEADING DETECTION (Original approach)
+    # ------------------------------------------------------------
+    def _detect_numeric_heading(self, line: str) -> Optional[tuple]:
+        """
+        Extract numeric prefix from heading.
+        Example: "2.1. Definition" -> ([2, 1], "Definition")
+        """
+        match = re.match(r"^(\d+(?:\.\d+)*\.?)\s+(.+)$", line)
+        if not match:
+            return None
+        numeric_part = match.group(1).rstrip(".")
+        title = match.group(2).strip()
+        levels = list(map(int, numeric_part.split(".")))
+        return (levels, title)
 
-    def _split_by_headers(self, text: str) -> List[Dict[str, Any]]:
-        """Split text by markdown headers while preserving hierarchy."""
-        sections = []
-
-        # Pattern to match headers and capture their level and text
-        header_pattern = r"^(#{1,6})\s+(.+?)$"
-
+    def _split_by_numeric_headers(self, text: str) -> List[Dict[str, Any]]:
+        """Split by numeric headers like 2.1, 3.4.2, etc."""
         lines = text.split("\n")
-        current_section = {"content": [], "header": None, "level": 0, "parent": None}
-
-        header_stack = [None, None, None, None, None, None]  # Track hierarchy
+        sections = []
+        current = {"header": None, "content": [], "section_level": None}
+        level_headers = {}
 
         for line in lines:
-            match = re.match(header_pattern, line)
+            detected = self._detect_numeric_heading(line)
 
-            if match:
-                # Save previous section if it has content
-                if current_section["content"]:
+            if detected:
+                # Save previous section
+                if current["content"]:
                     sections.append(
                         {
-                            "content": "\n".join(current_section["content"]),
-                            "header": current_section["header"],
-                            "level": current_section["level"],
-                            "parent": current_section["parent"],
+                            "header": current["header"],
+                            "section_level": current["section_level"],
+                            "parent": current.get("parent"),
+                            "top_header": level_headers.get(1),  # Top-level header
+                            "content": "\n".join(current["content"]),
                         }
                     )
 
-                # Start new section
-                level = len(match.group(1))
-                header_text = match.group(2).strip()
+                levels, title = detected
+                level = len(levels)
+                full_header = f"{'.'.join(map(str, levels))}. {title}"
 
-                # Update header stack
-                header_stack[level - 1] = header_text
-                for i in range(level, 6):
-                    header_stack[i] = None
+                # Update hierarchy
+                level_headers[level] = full_header
+                for k in range(level + 1, 10):
+                    level_headers.pop(k, None)
 
-                # Find parent (first non-None header at lower level)
-                parent = None
-                for i in range(level - 2, -1, -1):
-                    if header_stack[i]:
-                        parent = header_stack[i]
-                        break
+                parent = level_headers.get(level - 1)
 
-                current_section = {
-                    "content": [line],
-                    "header": header_text,
-                    "level": level,
+                current = {
+                    "header": full_header,
+                    "section_level": level,
                     "parent": parent,
+                    "content": [line],
                 }
             else:
-                current_section["content"].append(line)
+                current["content"].append(line)
 
-        # Don't forget the last section
-        if current_section["content"]:
+        # Final section
+        if current["content"]:
             sections.append(
                 {
-                    "content": "\n".join(current_section["content"]),
-                    "header": current_section["header"],
-                    "level": current_section["level"],
-                    "parent": current_section["parent"],
+                    "header": current["header"],
+                    "section_level": current["section_level"],
+                    "parent": current.get("parent"),
+                    "top_header": level_headers.get(1),  # Top-level header
+                    "content": "\n".join(current["content"]),
                 }
             )
 
         return sections
 
+    # ------------------------------------------------------------
+    # MARKDOWN HEADER SPLITTING (LangChain approach)
+    # ------------------------------------------------------------
+    def _split_by_markdown_headers(self, text: str) -> List[Dict[str, Any]]:
+        """Split by standard markdown headers using LangChain."""
+        if not LANGCHAIN_AVAILABLE or not self.header_splitter:
+            return []
+
+        docs = self.header_splitter.split_text(text)
+        sections = []
+        prev_headers = {"Header 1": None, "Header 2": None, "Header 3": None}
+
+        for doc in docs:
+            content = getattr(doc, "page_content", "") or ""
+            md = getattr(doc, "metadata", {}) or {}
+
+            # Update header hierarchy
+            if "Header 1" in md:
+                prev_headers["Header 1"] = md["Header 1"]
+                prev_headers["Header 2"] = None
+                prev_headers["Header 3"] = None
+            if "Header 2" in md:
+                prev_headers["Header 2"] = md["Header 2"]
+                prev_headers["Header 3"] = None
+            if "Header 3" in md:
+                prev_headers["Header 3"] = md["Header 3"]
+
+            # Determine section info
+            section_header = (
+                md.get("Header 3") or md.get("Header 2") or md.get("Header 1")
+            )
+
+            if "Header 3" in md:
+                section_level = 3
+                parent_section = prev_headers["Header 2"]
+            elif "Header 2" in md:
+                section_level = 2
+                parent_section = prev_headers["Header 1"]
+            elif "Header 1" in md:
+                section_level = 1
+                parent_section = None
+            else:
+                section_level = None
+                parent_section = None
+
+            sections.append(
+                {
+                    "header": section_header,
+                    "section_level": section_level,
+                    "parent": parent_section,
+                    "top_header": prev_headers["Header 1"],  # Top-level header
+                    "content": content,
+                }
+            )
+
+        return sections
+
+    # ------------------------------------------------------------
+    # AUTO-DETECT HEADER STYLE
+    # ------------------------------------------------------------
+    def _detect_header_style(self, text: str) -> str:
+        """Detect whether document uses numeric or markdown headers."""
+        # Check for markdown headers
+        md_pattern = r"^#{1,3}\s+.+"
+        md_matches = len(re.findall(md_pattern, text, re.MULTILINE))
+
+        # Check for numeric headers
+        num_pattern = r"^\d+(?:\.\d+)*\.?\s+.+"
+        num_matches = len(re.findall(num_pattern, text, re.MULTILINE))
+
+        if md_matches > num_matches:
+            return "markdown"
+        elif num_matches > 0:
+            return "numeric"
+        else:
+            return "markdown"  # Default to markdown
+
+    # ------------------------------------------------------------
+    # PROCESS SECTIONS WITH CONTENT-AWARE SPLITTING
+    # ------------------------------------------------------------
     def _process_sections(self, sections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Process each section, splitting by content type and token limits."""
+        """Process sections with content-aware splitting."""
         all_chunks = []
 
         for section in sections:
             content = section["content"]
-
-            # Detect content blocks (code vs prose)
             blocks = detect_content_blocks(content)
 
             for block in blocks:
-                chunks = self._split_block(block)
+                # Special handling for each block type
+                if block.type in [
+                    ContentType.CODE,
+                    ContentType.MATH,
+                    ContentType.TABLE,
+                ]:
+                    # Keep these intact using specialized splitters
+                    chunk_texts = self._split_special_block(block)
+                else:
+                    # Use recursive splitter for prose if available
+                    chunk_texts = self._split_prose_block(block)
 
-                for chunk_text in chunks:
+                for text in chunk_texts:
                     all_chunks.append(
                         {
-                            "content": chunk_text,
+                            "content": text,
                             "metadata": {
                                 "section_header": section["header"],
-                                "section_level": section["level"],
-                                "parent_section": section["parent"],
+                                "section_level": section["section_level"],
+                                "parent_section": section.get("parent"),
+                                "top_header": section.get("top_header"),  # ← RESTORED
                                 "content_type": block.type.value,
                             },
-                            "estimated_tokens": count_tokens(chunk_text),
+                            "estimated_tokens": count_tokens(text),
                         }
                     )
 
         return all_chunks
 
-    def _split_block(self, block: ContentBlock) -> List[str]:
-        """Split a content block based on its type."""
-        max_tokens = self.config.max_chunk_tokens
+    def _split_special_block(self, block: ContentBlock) -> List[str]:
+        """Split code, math, or table blocks."""
+        max_t = self.config.max_chunk_tokens
 
-        if block.type == ContentType.CODE:
-            if self.config.preserve_code_blocks:
-                return split_code_block(block.content, max_tokens)
+        if block.type == ContentType.MATH:
+            return split_math_block(block.content, max_t)
+        elif block.type == ContentType.TABLE:
+            return split_table_block(block.content, max_t)
+        elif block.type == ContentType.CODE:
+            return split_code_block(block.content, max_t)
+
+        return [block.content]
+
+    def _split_prose_block(self, block: ContentBlock) -> List[str]:
+        """Split prose using recursive splitter if available, else fallback."""
+        if (
+            self.config.use_recursive_splitter
+            and LANGCHAIN_AVAILABLE
+            and self.recursive_splitter
+        ):
+            # Use recursive splitter for better results
+            if count_tokens(block.content) > self.config.max_chunk_tokens:
+                docs = self.recursive_splitter.split_text(block.content)
+                return [doc for doc in docs if doc.strip()]
+            return [block.content]
+        else:
+            # Fallback to paragraph splitting
+            return self._split_by_paragraphs(block.content)
+
+    def _split_by_paragraphs(self, text: str) -> List[str]:
+        """Fallback paragraph-based splitting."""
+        paragraphs = re.split(r"\n\s*\n", text)
+        chunks = []
+        max_t = self.config.max_chunk_tokens
+
+        for p in paragraphs:
+            p = p.strip()
+            if not p:
+                continue
+
+            if count_tokens(p) <= max_t:
+                chunks.append(p)
             else:
-                # Treat as prose if not preserving
-                return split_by_paragraphs(block.content, max_tokens)
-        else:  # PROSE or MIXED
-            return split_by_paragraphs(block.content, max_tokens)
+                # Split by sentences
+                pattern = r"(?<=[.!?])\s+(?=[A-Z])"
+                sentences = re.split(pattern, p)
+                current = ""
 
+                for s in sentences:
+                    test = (current + " " + s).strip()
+                    if count_tokens(test) > max_t and current:
+                        chunks.append(current)
+                        current = s
+                    else:
+                        current = test
+
+                if current:
+                    chunks.append(current)
+
+        return chunks if chunks else [text]
+
+    # ------------------------------------------------------------
+    # MERGE SHORT CHUNKS
+    # ------------------------------------------------------------
     def _merge_short_chunks(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Merge short chunks intelligently."""
-        if len(chunks) <= 1:
+        """Merge chunks that are too short."""
+        if len(chunks) <= 1 or not self.config.merge_short_chunks:
             return chunks
 
         merged = []
         i = 0
 
         while i < len(chunks):
-            current = chunks[i]
+            curr = chunks[i]
 
-            # Check if current chunk is too short
-            if current[
-                "estimated_tokens"
-            ] < self.config.min_chunk_tokens and i + 1 < len(chunks):
-                next_chunk = chunks[i + 1]
+            if curr["estimated_tokens"] < self.config.min_chunk_tokens and i + 1 < len(
+                chunks
+            ):
+                nxt = chunks[i + 1]
 
-                # Check if they're from the same section
                 same_section = (
-                    current["metadata"]["section_header"]
-                    == next_chunk["metadata"]["section_header"]
+                    curr["metadata"]["section_header"]
+                    == nxt["metadata"]["section_header"]
                 )
-
-                # Check if merged size would be reasonable
-                merged_tokens = (
-                    current["estimated_tokens"] + next_chunk["estimated_tokens"]
-                )
-                fits = (
-                    merged_tokens <= self.config.max_chunk_tokens * 1.2
-                )  # Allow 20% overflow
+                merged_tokens = curr["estimated_tokens"] + nxt["estimated_tokens"]
+                fits = merged_tokens <= int(self.config.max_chunk_tokens * 1.2)
 
                 if same_section and fits:
-                    # Merge current into next
-                    merged_content = current["content"] + "\n\n" + next_chunk["content"]
-                    next_chunk["content"] = merged_content
-                    next_chunk["estimated_tokens"] = count_tokens(merged_content)
-                    i += 1  # Skip current, process next in next iteration
+                    combined = curr["content"] + "\n\n" + nxt["content"]
+                    nxt["content"] = combined
+                    nxt["estimated_tokens"] = count_tokens(combined)
+                    i += 1
                     continue
 
-            merged.append(current)
+            merged.append(curr)
             i += 1
 
         return merged
 
-    def _assign_chunk_indices(
-        self, chunks: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
-        """Assign sequential indices to chunks."""
+    # ------------------------------------------------------------
+    # PUBLIC ENTRY POINT
+    # ------------------------------------------------------------
+    def process(self, markdown_text: str) -> List[Dict[str, Any]]:
+        """
+        Main processing function that:
+        1. Auto-detects header style
+        2. Splits by headers
+        3. Processes content blocks with appropriate splitters
+        4. Merges short chunks
+        5. Assigns indices
+        """
+        # Auto-detect and split by headers
+        header_style = self._detect_header_style(markdown_text)
+
+        if header_style == "numeric":
+            sections = self._split_by_numeric_headers(markdown_text)
+        else:
+            sections = self._split_by_markdown_headers(markdown_text)
+            if not sections:  # Fallback if LangChain not available
+                sections = self._split_by_numeric_headers(markdown_text)
+
+        # Process sections with content-aware splitting
+        chunks = self._process_sections(sections)
+
+        # Merge short chunks if enabled
+        if self.config.merge_short_chunks:
+            chunks = self._merge_short_chunks(chunks)
+
+        # Assign chunk indices
         for idx, chunk in enumerate(chunks):
             chunk["chunk_index"] = idx
+
         return chunks
 
 
-# -------------------------------------------------------------------
-# Convenience function
-# -------------------------------------------------------------------
+# ============================================================
+# CONVENIENCE FUNCTION
+# ============================================================
+
+
 def chunk_markdown(
-    markdown_text: str, max_tokens: int = 300, min_tokens: int = 50
-) -> List[Dict[str, Any]]:
+    markdown_text: str,
+    max_tokens: int = 300,
+    min_tokens: int = 50,
+    use_recursive_splitter: bool = True,
+):
     """
     Convenience function to chunk markdown text.
 
@@ -425,45 +593,59 @@ def chunk_markdown(
         markdown_text: The markdown text to chunk
         max_tokens: Maximum tokens per chunk
         min_tokens: Minimum tokens per chunk (for merging)
+        use_recursive_splitter: Use recursive splitter for prose (recommended)
 
     Returns:
         List of chunk dictionaries with content, metadata, and token counts
     """
-    config = ChunkConfig(max_chunk_tokens=max_tokens, min_chunk_tokens=min_tokens)
-    chunker = MarkdownChunker(config)
-    return chunker.process(markdown_text)
+    config = ChunkConfig(
+        max_chunk_tokens=max_tokens,
+        min_chunk_tokens=min_tokens,
+        use_recursive_splitter=use_recursive_splitter,
+    )
+    return HybridMarkdownChunker(config).process(markdown_text)
 
 
-# -------------------------------------------------------------------
-# Example usage
-# -------------------------------------------------------------------
+# ============================================================
+# EXAMPLE USAGE
+# ============================================================
+
+
 if __name__ == "__main__":
+    # Example with both header styles
     sample_md = """
-# Recursive Reasoning with Tiny Networks
+# Introduction
 
-## Algorithms with different number of latent features
+This is the introduction section with some text.
+
+## Background
+
+Some background information here.
+
+### Related Work
+
+Details about related work.
+
+2. AUDIO DEEPFAKE VERIFICATION
+
+This section uses numeric headers.
+
+2.1. Definition
+
+The definition subsection.
+
+2.1.1. Technical Details
 
 ```python
-def latent_recursion(x, z, n=6):
-    for i in range(n+1):  # latent recursion
-        z = net(x, z)
-    return z
-
-def deep_recursion(x, z, n=6, T=3):
-    # recursing T-1 times to improve z (no gradients needed)
-    with torch.no_grad():
-        for j in range(T-1):
-            z = latent_recursion(x, z, n)
-    # recursing once to improve z
-    z = latent_recursion(x, z, n)
-    return z.detach(), output_head(y), Q_head(y)
+def example():
+    return "code block"
 ```
 
-This approach allows for flexible handling of latent features.
+More technical details here.
 
-## Example on Sudoku-Extreme
+## Conclusion
 
-The following figure shows results on a challenging Sudoku puzzle.
+Final thoughts and conclusions.
 """
 
     chunks = chunk_markdown(sample_md, max_tokens=200)
@@ -471,8 +653,9 @@ The following figure shows results on a challenging Sudoku puzzle.
     print(f"Generated {len(chunks)} chunks:\n")
     for chunk in chunks:
         print(f"Chunk {chunk['chunk_index']}:")
-        print(f"  Tokens: {chunk['estimated_tokens']}")
         print(f"  Header: {chunk['metadata']['section_header']}")
+        print(f"  Level: {chunk['metadata']['section_level']}")
         print(f"  Type: {chunk['metadata']['content_type']}")
+        print(f"  Tokens: {chunk['estimated_tokens']}")
         print(f"  Content preview: {chunk['content'][:100]}...")
         print()

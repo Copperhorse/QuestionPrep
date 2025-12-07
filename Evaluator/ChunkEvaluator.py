@@ -97,8 +97,8 @@ class ChunkEvaluator:
         # Count table rows (lines with |)
         table_rows = sum(1 for line in lines if "|" in line)
 
-        # Get header
-        header = metadata.get("section_header", "").lower()
+        # Get header - handle None values
+        header = (metadata.get("section_header") or "").lower()
 
         # Table of contents indicators
         if any(x in header for x in ["table of contents", "contents"]):
@@ -151,7 +151,7 @@ class ChunkEvaluator:
         text = (content or "").strip()
         text_lower = text.lower()
 
-        # Extract header text from metadata
+        # Extract header text from metadata - handle None values
         header_text = ""
         for key in (
             "section_header",
@@ -282,8 +282,8 @@ class ChunkEvaluator:
         elif alpha_ratio > 0.5:
             score += 10
 
-        # Bonus for having meaningful header
-        header = metadata.get("section_header", "")
+        # Bonus for having meaningful header - handle None values
+        header = metadata.get("section_header") or ""
         if header and len(header) > 3:
             score += 10
 

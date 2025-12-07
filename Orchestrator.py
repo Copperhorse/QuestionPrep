@@ -22,7 +22,7 @@ def main():
     # Initialize all components
     print("\n Initializing components...")
     converter = PDFDocumentConverter()
-    config = ChunkConfig()
+    config = ChunkConfig(max_chunk_tokens=500)
     chunker = MarkdownChunker(config)
     id_generator = IDGenerator()
     simhash_handler = SimHashHandler(k=3)
