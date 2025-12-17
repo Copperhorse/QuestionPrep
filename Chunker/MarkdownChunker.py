@@ -24,8 +24,6 @@ except ImportError:
 # ============================================================
 # TOKEN COUNTING
 # ============================================================
-
-
 def count_tokens(text: str) -> int:
     """Count tokens using tiktoken if available, otherwise approximate."""
     if TIKTOKEN_AVAILABLE:
@@ -40,8 +38,6 @@ def count_tokens(text: str) -> int:
 # ============================================================
 # CONTENT TYPES
 # ============================================================
-
-
 class ContentType(Enum):
     CODE = "code"
     MATH = "math"
@@ -60,8 +56,6 @@ class ContentBlock:
 # ============================================================
 # BLOCK DETECTION
 # ============================================================
-
-
 def detect_content_blocks(text: str) -> List[ContentBlock]:
     """
     Detect code, math, table, and prose blocks inside markdown text.
@@ -69,23 +63,23 @@ def detect_content_blocks(text: str) -> List[ContentBlock]:
     blocks = []
     patterns = []
 
-    # Code blocks
+    # Code blocks: ```...```
     code_pat = r"```[\s\S]*?```"
     patterns.append((code_pat, ContentType.CODE))
 
-    # Math $$...$$
+    # Inline math $$...$$
     math_pat = r"\$\$[\s\S]*?\$\$"
     patterns.append((math_pat, ContentType.MATH))
 
-    # Math \[ ... \]
+    # Display math \[ ... \]
     math_bracket_pat = r"\\\[[\s\S]*?\\\]"
     patterns.append((math_bracket_pat, ContentType.MATH))
 
-    # Math environments
-    env_pat = r"\\begin\{(equation|align|gather|multline)\}[\s\S]*?\\end\{\1\}"
+    # LaTeX environments
+    env_pat = r"\\begin\{(equation|align|gather|multline|eqnarray).*?\}\\end\{\1\}"
     patterns.append((env_pat, ContentType.MATH))
 
-    # Tables
+    # Markdown tables
     table_pat = (
         r"(?:^\|.*\|\s*\n"  # header
         r"^\|[-: ]+\|\s*\n"  # separator
@@ -93,21 +87,20 @@ def detect_content_blocks(text: str) -> List[ContentBlock]:
     )
     patterns.append((table_pat, ContentType.TABLE))
 
-    # Collect matches
+    # Collect all matches
     matches = []
     for pat, typ in patterns:
         for m in re.finditer(pat, text, re.MULTILINE):
             matches.append((m.start(), m.end(), m.group(0), typ))
 
     matches.sort(key=lambda x: x[0])
-
     last_end = 0
+
     for start, end, content, typ in matches:
         if start > last_end:
             prose = text[last_end:start].strip()
             if prose:
                 blocks.append(ContentBlock(prose, ContentType.PROSE, last_end, start))
-
         blocks.append(ContentBlock(content, typ, start, end))
         last_end = end
 
@@ -125,46 +118,35 @@ def detect_content_blocks(text: str) -> List[ContentBlock]:
 # ============================================================
 # SPECIALIZED BLOCK SPLITTING
 # ============================================================
-
-
 def split_math_block(math: str, max_tokens: int) -> List[str]:
-    """Keep entire math block intact whenever possible."""
     if count_tokens(math) <= max_tokens:
         return [math]
-
+    # Fallback: split by lines
     lines = math.split("\n")
     chunks, current = [], ""
-
     for line in lines:
         test = current + line + "\n"
         if count_tokens(test) > max_tokens and current:
-            chunks.append(current)
+            chunks.append(current.rstrip("\n"))
             current = line + "\n"
         else:
             current = test
-
     if current:
-        chunks.append(current)
-
+        chunks.append(current.rstrip("\n"))
     return chunks
 
 
 def split_table_block(table: str, max_tokens: int) -> List[str]:
-    """Keep table intact or split by row groups if extremely large."""
     if count_tokens(table) <= max_tokens:
         return [table]
-
     lines = table.strip().split("\n")
     if len(lines) < 3:
         return [table]
-
     header = lines[0]
     separator = lines[1]
     body = lines[2:]
-
     chunks = []
     current = [header, separator]
-
     for row in body:
         test = "\n".join(current + [row])
         if count_tokens(test) > max_tokens and len(current) > 2:
@@ -172,75 +154,57 @@ def split_table_block(table: str, max_tokens: int) -> List[str]:
             current = [header, separator, row]
         else:
             current.append(row)
-
     if current:
         chunks.append("\n".join(current))
     return chunks
 
 
 def split_code_block(code: str, max_tokens: int) -> List[str]:
-    """Split code block by lines, preserving syntax structure."""
     if count_tokens(code) <= max_tokens:
         return [code]
-
     chunks, current = [], ""
     for line in code.split("\n"):
         test = current + line + "\n"
         if count_tokens(test) > max_tokens and current:
-            chunks.append(current)
+            chunks.append(current.rstrip("\n"))
             current = line + "\n"
         else:
             current = test
-
     if current:
-        chunks.append(current)
+        chunks.append(current.rstrip("\n"))
     return chunks
 
 
 # ============================================================
 # CONFIG
 # ============================================================
-
-
 @dataclass
 class ChunkConfig:
     max_chunk_tokens: int = 300
     min_chunk_tokens: int = 50
     preserve_code_blocks: bool = True
     merge_short_chunks: bool = True
-    use_recursive_splitter: bool = True  # NEW: Enable recursive splitting
+    use_recursive_splitter: bool = True
 
 
 # ============================================================
-# MAIN CHUNKER WITH BOTH APPROACHES
+# MAIN CHUNKER
 # ============================================================
-
-
-class HybridMarkdownChunker:
-    """
-    Supports both:
-    1. Numeric headers (2.1.3 Title) - original approach
-    2. Standard markdown headers (# ## ###) - via MarkdownHeaderTextSplitter
-    3. Recursive splitting for prose - intelligently splits long text
-    """
-
+class MarkdownChunker:
     def __init__(self, config: Optional[ChunkConfig] = None):
         self.config = config or ChunkConfig()
-
-        # Initialize LangChain splitters if available
         if LANGCHAIN_AVAILABLE:
             self.header_splitter = MarkdownHeaderTextSplitter(
                 headers_to_split_on=[
                     ("#", "Header 1"),
                     ("##", "Header 2"),
                     ("###", "Header 3"),
+                    ("####", "Header 4"),
                 ],
                 strip_headers=False,
             )
-
-            # Recursive splitter for prose content
             self.recursive_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=self.config.max_chunk_tokens * 4,  # Approximate chars
+                chunk_size=self.config.max_chunk_tokens * 4,
                 chunk_overlap=50,
                 length_function=count_tokens,
                 separators=["\n\n", "\n", ". ", " ", ""],
@@ -250,14 +214,10 @@ class HybridMarkdownChunker:
             self.recursive_splitter = None
 
     # ------------------------------------------------------------
-    # NUMERIC HEADING DETECTION (Original approach)
+    # NUMERIC HEADING DETECTION
     # ------------------------------------------------------------
     def _detect_numeric_heading(self, line: str) -> Optional[tuple]:
-        """
-        Extract numeric prefix from heading.
-        Example: "2.1. Definition" -> ([2, 1], "Definition")
-        """
-        match = re.match(r"^(\d+(?:\.\d+)*\.?)\s+(.+)$", line)
+        match = re.match(r"^(\d+(?:\.\d+)*\.?)\s+(.+)$", line.strip())
         if not match:
             return None
         numeric_part = match.group(1).rstrip(".")
@@ -266,7 +226,6 @@ class HybridMarkdownChunker:
         return (levels, title)
 
     def _split_by_numeric_headers(self, text: str) -> List[Dict[str, Any]]:
-        """Split by numeric headers like 2.1, 3.4.2, etc."""
         lines = text.split("\n")
         sections = []
         current = {"header": None, "content": [], "section_level": None}
@@ -274,31 +233,24 @@ class HybridMarkdownChunker:
 
         for line in lines:
             detected = self._detect_numeric_heading(line)
-
             if detected:
-                # Save previous section
                 if current["content"]:
                     sections.append(
                         {
                             "header": current["header"],
                             "section_level": current["section_level"],
                             "parent": current.get("parent"),
-                            "top_header": level_headers.get(1),  # Top-level header
+                            "top_header": level_headers.get(1),
                             "content": "\n".join(current["content"]),
                         }
                     )
-
                 levels, title = detected
                 level = len(levels)
                 full_header = f"{'.'.join(map(str, levels))}. {title}"
-
-                # Update hierarchy
                 level_headers[level] = full_header
                 for k in range(level + 1, 10):
                     level_headers.pop(k, None)
-
                 parent = level_headers.get(level - 1)
-
                 current = {
                     "header": full_header,
                     "section_level": level,
@@ -308,71 +260,86 @@ class HybridMarkdownChunker:
             else:
                 current["content"].append(line)
 
-        # Final section
         if current["content"]:
             sections.append(
                 {
                     "header": current["header"],
                     "section_level": current["section_level"],
                     "parent": current.get("parent"),
-                    "top_header": level_headers.get(1),  # Top-level header
+                    "top_header": level_headers.get(1),
                     "content": "\n".join(current["content"]),
                 }
             )
-
         return sections
 
     # ------------------------------------------------------------
-    # MARKDOWN HEADER SPLITTING (LangChain approach)
+    # MARKDOWN HEADER SPLITTING
     # ------------------------------------------------------------
     def _split_by_markdown_headers(self, text: str) -> List[Dict[str, Any]]:
-        """Split by standard markdown headers using LangChain."""
         if not LANGCHAIN_AVAILABLE or not self.header_splitter:
             return []
 
         docs = self.header_splitter.split_text(text)
         sections = []
-        prev_headers = {"Header 1": None, "Header 2": None, "Header 3": None}
+
+        # Track current active headers at each level
+        current_headers = {
+            1: None,
+            2: None,
+            3: None,
+            4: None,
+        }
 
         for doc in docs:
-            content = getattr(doc, "page_content", "") or ""
-            md = getattr(doc, "metadata", {}) or {}
+            content = doc.page_content.strip()
+            metadata = doc.metadata
 
-            # Update header hierarchy
-            if "Header 1" in md:
-                prev_headers["Header 1"] = md["Header 1"]
-                prev_headers["Header 2"] = None
-                prev_headers["Header 3"] = None
-            if "Header 2" in md:
-                prev_headers["Header 2"] = md["Header 2"]
-                prev_headers["Header 3"] = None
-            if "Header 3" in md:
-                prev_headers["Header 3"] = md["Header 3"]
+            # Update current headers based on what's present in this chunk
+            header_text = None
+            level = None
 
-            # Determine section info
-            section_header = (
-                md.get("Header 3") or md.get("Header 2") or md.get("Header 1")
-            )
+            if "Header 4" in metadata:
+                header_text = metadata["Header 4"]
+                level = 4
+                current_headers[4] = header_text
+                current_headers[3] = metadata.get(
+                    "Header 3"
+                )  # in case it was carried over
+                current_headers[2] = metadata.get("Header 2")
+                current_headers[1] = metadata.get("Header 1")
+            elif "Header 3" in metadata:
+                header_text = metadata["Header 3"]
+                level = 3
+                current_headers[3] = header_text
+                current_headers[4] = None  # reset lower level
+                current_headers[2] = metadata.get("Header 2")
+                current_headers[1] = metadata.get("Header 1")
+            elif "Header 2" in metadata:
+                header_text = metadata["Header 2"]
+                level = 2
+                current_headers[2] = header_text
+                current_headers[3] = None
+                current_headers[4] = None
+                current_headers[1] = metadata.get("Header 1")
+            elif "Header 1" in metadata:
+                header_text = metadata["Header 1"]
+                level = 1
+                current_headers[1] = header_text
+                current_headers[2] = None
+                current_headers[3] = None
+                current_headers[4] = None
 
-            if "Header 3" in md:
-                section_level = 3
-                parent_section = prev_headers["Header 2"]
-            elif "Header 2" in md:
-                section_level = 2
-                parent_section = prev_headers["Header 1"]
-            elif "Header 1" in md:
-                section_level = 1
-                parent_section = None
-            else:
-                section_level = None
-                parent_section = None
+            # Determine parent: one level up
+            parent = None
+            if level and level > 1:
+                parent = current_headers.get(level - 1)
 
             sections.append(
                 {
-                    "header": section_header,
-                    "section_level": section_level,
-                    "parent": parent_section,
-                    "top_header": prev_headers["Header 1"],  # Top-level header
+                    "header": header_text,
+                    "section_level": level,
+                    "parent": parent,
+                    "top_header": current_headers[1],
                     "content": content,
                 }
             )
@@ -380,195 +347,132 @@ class HybridMarkdownChunker:
         return sections
 
     # ------------------------------------------------------------
-    # AUTO-DETECT HEADER STYLE
+    # HEADER STYLE DETECTION (IMPROVED)
     # ------------------------------------------------------------
     def _detect_header_style(self, text: str) -> str:
-        """Detect whether document uses numeric or markdown headers."""
-        # Check for markdown headers
-        md_pattern = r"^#{1,3}\s+.+"
+        md_pattern = r"^#{1,4}\s+.+"  # # to ####
         md_matches = len(re.findall(md_pattern, text, re.MULTILINE))
 
-        # Check for numeric headers
-        num_pattern = r"^\d+(?:\.\d+)*\.?\s+.+"
+        # Only count numeric headings that do NOT start with #
+        num_pattern = r"^(?!#{1,4}\s)\d+(?:\.\d+)*\.?\s+.+"
         num_matches = len(re.findall(num_pattern, text, re.MULTILINE))
 
-        if md_matches > num_matches:
-            return "markdown"
-        elif num_matches > 0:
-            return "numeric"
-        else:
-            return "markdown"  # Default to markdown
+        if md_matches > 0:
+            return "markdown"  # Prefer markdown if any real # headers exist
+        return "numeric" if num_matches > 0 else "markdown"
 
     # ------------------------------------------------------------
-    # PROCESS SECTIONS WITH CONTENT-AWARE SPLITTING
+    # CONTENT-AWARE PROCESSING
     # ------------------------------------------------------------
     def _process_sections(self, sections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Process sections with content-aware splitting."""
         all_chunks = []
-
         for section in sections:
             content = section["content"]
             blocks = detect_content_blocks(content)
 
             for block in blocks:
-                # Special handling for each block type
                 if block.type in [
                     ContentType.CODE,
                     ContentType.MATH,
                     ContentType.TABLE,
                 ]:
-                    # Keep these intact using specialized splitters
                     chunk_texts = self._split_special_block(block)
                 else:
-                    # Use recursive splitter for prose if available
                     chunk_texts = self._split_prose_block(block)
 
                 for text in chunk_texts:
                     all_chunks.append(
                         {
-                            "content": text,
+                            "content": text.strip(),
                             "metadata": {
                                 "section_header": section["header"],
                                 "section_level": section["section_level"],
                                 "parent_section": section.get("parent"),
-                                "top_header": section.get("top_header"),  # ← RESTORED
+                                "top_header": section.get("top_header"),
                                 "content_type": block.type.value,
                             },
                             "estimated_tokens": count_tokens(text),
                         }
                     )
-
         return all_chunks
 
     def _split_special_block(self, block: ContentBlock) -> List[str]:
-        """Split code, math, or table blocks."""
         max_t = self.config.max_chunk_tokens
-
         if block.type == ContentType.MATH:
             return split_math_block(block.content, max_t)
         elif block.type == ContentType.TABLE:
             return split_table_block(block.content, max_t)
         elif block.type == ContentType.CODE:
             return split_code_block(block.content, max_t)
-
         return [block.content]
 
     def _split_prose_block(self, block: ContentBlock) -> List[str]:
-        """Split prose using recursive splitter if available, else fallback."""
+        """Split prose using recursive splitter if available and needed."""
+        text = block.content.strip()
+        if not text:
+            return []
+
         if (
             self.config.use_recursive_splitter
             and LANGCHAIN_AVAILABLE
             and self.recursive_splitter
+            and count_tokens(text) > self.config.max_chunk_tokens
         ):
-            # Use recursive splitter for better results
-            if count_tokens(block.content) > self.config.max_chunk_tokens:
-                docs = self.recursive_splitter.split_text(block.content)
-                return [doc for doc in docs if doc.strip()]
-            return [block.content]
-        else:
-            # Fallback to paragraph splitting
-            return self._split_by_paragraphs(block.content)
+            chunks = self.recursive_splitter.split_text(text)
+            return [chunk.strip() for chunk in chunks if chunk.strip()]
 
-    def _split_by_paragraphs(self, text: str) -> List[str]:
-        """Fallback paragraph-based splitting."""
-        paragraphs = re.split(r"\n\s*\n", text)
-        chunks = []
-        max_t = self.config.max_chunk_tokens
-
-        for p in paragraphs:
-            p = p.strip()
-            if not p:
-                continue
-
-            if count_tokens(p) <= max_t:
-                chunks.append(p)
-            else:
-                # Split by sentences
-                pattern = r"(?<=[.!?])\s+(?=[A-Z])"
-                sentences = re.split(pattern, p)
-                current = ""
-
-                for s in sentences:
-                    test = (current + " " + s).strip()
-                    if count_tokens(test) > max_t and current:
-                        chunks.append(current)
-                        current = s
-                    else:
-                        current = test
-
-                if current:
-                    chunks.append(current)
-
-        return chunks if chunks else [text]
+        return [text]
 
     # ------------------------------------------------------------
     # MERGE SHORT CHUNKS
     # ------------------------------------------------------------
     def _merge_short_chunks(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Merge chunks that are too short."""
         if len(chunks) <= 1 or not self.config.merge_short_chunks:
             return chunks
 
         merged = []
         i = 0
-
         while i < len(chunks):
             curr = chunks[i]
-
             if curr["estimated_tokens"] < self.config.min_chunk_tokens and i + 1 < len(
                 chunks
             ):
                 nxt = chunks[i + 1]
-
                 same_section = (
                     curr["metadata"]["section_header"]
                     == nxt["metadata"]["section_header"]
                 )
-                merged_tokens = curr["estimated_tokens"] + nxt["estimated_tokens"]
-                fits = merged_tokens <= int(self.config.max_chunk_tokens * 1.2)
-
-                if same_section and fits:
-                    combined = curr["content"] + "\n\n" + nxt["content"]
-                    nxt["content"] = combined
-                    nxt["estimated_tokens"] = count_tokens(combined)
+                combined_tokens = curr["estimated_tokens"] + nxt["estimated_tokens"]
+                if same_section and combined_tokens <= int(
+                    self.config.max_chunk_tokens * 1.2
+                ):
+                    combined_text = curr["content"] + "\n\n" + nxt["content"]
+                    nxt["content"] = combined_text
+                    nxt["estimated_tokens"] = count_tokens(combined_text)
                     i += 1
                     continue
-
             merged.append(curr)
             i += 1
-
         return merged
 
     # ------------------------------------------------------------
-    # PUBLIC ENTRY POINT
+    # PUBLIC METHOD
     # ------------------------------------------------------------
     def process(self, markdown_text: str) -> List[Dict[str, Any]]:
-        """
-        Main processing function that:
-        1. Auto-detects header style
-        2. Splits by headers
-        3. Processes content blocks with appropriate splitters
-        4. Merges short chunks
-        5. Assigns indices
-        """
-        # Auto-detect and split by headers
         header_style = self._detect_header_style(markdown_text)
 
-        if header_style == "numeric":
-            sections = self._split_by_numeric_headers(markdown_text)
-        else:
+        if header_style == "markdown":
             sections = self._split_by_markdown_headers(markdown_text)
-            if not sections:  # Fallback if LangChain not available
+            if not sections:  # Fallback
                 sections = self._split_by_numeric_headers(markdown_text)
+        else:
+            sections = self._split_by_numeric_headers(markdown_text)
 
-        # Process sections with content-aware splitting
         chunks = self._process_sections(sections)
 
-        # Merge short chunks if enabled
         if self.config.merge_short_chunks:
             chunks = self._merge_short_chunks(chunks)
 
-        # Assign chunk indices
         for idx, chunk in enumerate(chunks):
             chunk["chunk_index"] = idx
 
@@ -578,84 +482,18 @@ class HybridMarkdownChunker:
 # ============================================================
 # CONVENIENCE FUNCTION
 # ============================================================
-
-
 def chunk_markdown(
     markdown_text: str,
-    max_tokens: int = 300,
+    max_tokens: int = 500,
     min_tokens: int = 50,
     use_recursive_splitter: bool = True,
-):
-    """
-    Convenience function to chunk markdown text.
-
-    Args:
-        markdown_text: The markdown text to chunk
-        max_tokens: Maximum tokens per chunk
-        min_tokens: Minimum tokens per chunk (for merging)
-        use_recursive_splitter: Use recursive splitter for prose (recommended)
-
-    Returns:
-        List of chunk dictionaries with content, metadata, and token counts
-    """
+    merge_short: bool = True,
+) -> List[Dict[str, Any]]:
     config = ChunkConfig(
         max_chunk_tokens=max_tokens,
         min_chunk_tokens=min_tokens,
         use_recursive_splitter=use_recursive_splitter,
+        merge_short_chunks=merge_short,
     )
-    return HybridMarkdownChunker(config).process(markdown_text)
-
-
-# ============================================================
-# EXAMPLE USAGE
-# ============================================================
-
-
-if __name__ == "__main__":
-    # Example with both header styles
-    sample_md = """
-# Introduction
-
-This is the introduction section with some text.
-
-## Background
-
-Some background information here.
-
-### Related Work
-
-Details about related work.
-
-2. AUDIO DEEPFAKE VERIFICATION
-
-This section uses numeric headers.
-
-2.1. Definition
-
-The definition subsection.
-
-2.1.1. Technical Details
-
-```python
-def example():
-    return "code block"
-```
-
-More technical details here.
-
-## Conclusion
-
-Final thoughts and conclusions.
-"""
-
-    chunks = chunk_markdown(sample_md, max_tokens=200)
-
-    print(f"Generated {len(chunks)} chunks:\n")
-    for chunk in chunks:
-        print(f"Chunk {chunk['chunk_index']}:")
-        print(f"  Header: {chunk['metadata']['section_header']}")
-        print(f"  Level: {chunk['metadata']['section_level']}")
-        print(f"  Type: {chunk['metadata']['content_type']}")
-        print(f"  Tokens: {chunk['estimated_tokens']}")
-        print(f"  Content preview: {chunk['content'][:100]}...")
-        print()
+    chunker = MarkdownChunker(config)
+    return chunker.process(markdown_text)
