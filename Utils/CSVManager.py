@@ -140,10 +140,17 @@ class CSVManager:
                     "file_id": file_id,
                     "chunk_index": chunk.get("chunk_index", idx),
                     "content": content,
+                    # Existing structural metadata
                     "section_header": meta.get("section_header", ""),
-                    "section_level": meta.get("section_level", ""),
+                    # "section_level": meta.get("section_level", ""),
                     "parent_section": meta.get("parent_section", ""),
-                    "top_header": meta.get("top_header", ""),  # <-- NEW COLUMN
+                    "top_header": meta.get("top_header", ""),
+                    # NEW: ToC-derived structure
+                    # "toc_full_path": meta.get("toc_full_path", ""),
+                    # "toc_level": meta.get("toc_level", ""),
+                    # "toc_numeric_id": meta.get("toc_numeric_id", ""),
+                    # "toc_parent_id": meta.get("toc_parent_id", ""),
+                    # Existing fields
                     "content_type": meta.get("content_type", ""),
                     "estimated_tokens": chunk.get("estimated_tokens", 0),
                     "prev_chunk_id": chunk_ids[idx - 1] if idx > 0 else "",

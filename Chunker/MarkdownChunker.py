@@ -424,35 +424,158 @@ class MarkdownChunker:
         return [text]
 
     # ------------------------------------------------------------
-    # MERGE SHORT CHUNKS
+    #   REMOVE CORRUPTED LATEX (REFINED LINE-BY-LINE)
+    # -----------------------------------------------------------
+    def _remove_corrupted_latex(self, chunk: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Refined line-by-line cleaner to remove OCR artifacts, 1-character lines,
+        and 'textual salad' while preserving valid prose, headers, and lists.
+        """
+        # Skip cleaning for code or math blocks to avoid breaking syntax
+        if chunk["metadata"].get("content_type") in {"code", "math"}:
+            return chunk
+
+        text = chunk["content"]
+        lines = text.splitlines()
+        cleaned_lines = []
+
+        # Patterns for known corruption tags (like 1\_b or <latexi)
+        corruption_markers = [
+            r"1\\_b",
+            r"<latexi",
+            r"&lt;",
+            r"&gt;",
+            r'64="',
+        ]
+
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                cleaned_lines.append("")
+                continue
+
+            # 1. Remove lines containing known noise markers
+            if any(
+                re.search(pat, stripped, re.IGNORECASE) for pat in corruption_markers
+            ):
+                continue
+
+            # 2. Aggressive filter for short fragments (Salad/OCR noise)
+            if len(stripped) < 15:
+                # Discard lines with only 1 or 2 characters (e.g., "I", "7", "uD")
+                if len(stripped) <= 2:
+                    continue
+
+                # Discard short lines that are NOT headers, lists, or full sentences.
+                # Valid short lines usually start with markdown (#, -) or end with (. , :)
+                is_markdown_element = stripped.startswith(
+                    ("#", "-", "*", ">", "1.", "2.")
+                )
+                has_sentence_punctuation = stripped.endswith(
+                    (".", ":", "!", "?", ")", "]")
+                )
+
+                if not is_markdown_element and not has_sentence_punctuation:
+                    continue
+
+                # High symbol/non-alphanumeric check (e.g. "+z", "v+")
+                non_alnum_ratio = sum(not c.isalnum() for c in stripped) / len(stripped)
+                if non_alnum_ratio > 0.4:
+                    continue
+
+            cleaned_lines.append(line)
+
+        # Reconstruct text and normalize whitespace
+        cleaned_text = "\n".join(cleaned_lines).strip()
+        cleaned_text = re.sub(r"\n{3,}", "\n\n", cleaned_text)
+
+        # Fallback if the entire chunk was garbage
+        if not cleaned_text or len(cleaned_text) < 5:
+            cleaned_text = "[REMOVED: Corrupted LaTeX content]"
+
+        chunk["content"] = cleaned_text
+        chunk["estimated_tokens"] = count_tokens(cleaned_text)
+
+        return chunk
+
     # ------------------------------------------------------------
+    # CONSERVATIVE ROLL-UP / MERGE LOGIC (WITH FRONT-MATTER SUPPORT)
+    # ------------------------------------------------------------
+    def _is_front_matter(self, chunk: Dict[str, Any]) -> bool:
+        """
+        Identify academic front-matter blocks that are allowed to roll up
+        even if section headers differ.
+        """
+        header = (chunk["metadata"].get("section_header") or "").strip().upper()
+        return header in {
+            "",
+            "ARTICLE HISTORY",
+            "ABSTRACT",
+            "KEYWORDS",
+            "AUTHOR INFORMATION",
+        }
+
     def _merge_short_chunks(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        if len(chunks) <= 1 or not self.config.merge_short_chunks:
+        """
+        Conservatively roll up adjacent small chunks.
+
+        Guarantees:
+        - Only adjacent chunks are merged
+        - No reordering
+        - No cross-content-type merging
+        - Section boundaries are respected,
+            except for explicit front-matter roll-up
+        - Hard token limits are enforced
+        """
+
+        if not chunks or not self.config.merge_short_chunks:
             return chunks
 
-        merged = []
-        i = 0
-        while i < len(chunks):
-            curr = chunks[i]
-            if curr["estimated_tokens"] < self.config.min_chunk_tokens and i + 1 < len(
-                chunks
+        merged: List[Dict[str, Any]] = []
+        buffer: Optional[Dict[str, Any]] = None
+
+        def compatible(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
+            # Strict rule: same section + same content type
+            if (
+                a["metadata"]["section_header"] == b["metadata"]["section_header"]
+                and a["metadata"]["content_type"] == b["metadata"]["content_type"]
+                and (a["estimated_tokens"] + b["estimated_tokens"])
+                <= self.config.max_chunk_tokens
             ):
-                nxt = chunks[i + 1]
-                same_section = (
-                    curr["metadata"]["section_header"]
-                    == nxt["metadata"]["section_header"]
-                )
-                combined_tokens = curr["estimated_tokens"] + nxt["estimated_tokens"]
-                if same_section and combined_tokens <= int(
-                    self.config.max_chunk_tokens * 1.2
-                ):
-                    combined_text = curr["content"] + "\n\n" + nxt["content"]
-                    nxt["content"] = combined_text
-                    nxt["estimated_tokens"] = count_tokens(combined_text)
-                    i += 1
-                    continue
-            merged.append(curr)
-            i += 1
+                return True
+
+            # Front-matter exception (prose only)
+            if (
+                self._is_front_matter(a)
+                and self._is_front_matter(b)
+                and a["metadata"]["content_type"] == "prose"
+                and b["metadata"]["content_type"] == "prose"
+                and (a["estimated_tokens"] + b["estimated_tokens"])
+                <= self.config.max_chunk_tokens
+            ):
+                return True
+
+            return False
+
+        for chunk in chunks:
+            if buffer is None:
+                buffer = chunk
+                continue
+
+            # Roll-up if safe
+            if buffer["estimated_tokens"] < self.config.min_chunk_tokens and compatible(
+                buffer, chunk
+            ):
+                buffer["content"] = buffer["content"] + "\n\n" + chunk["content"]
+                buffer["estimated_tokens"] = count_tokens(buffer["content"])
+            else:
+                merged.append(buffer)
+                buffer = chunk
+
+        # Flush final buffer
+        if buffer is not None:
+            merged.append(buffer)
+
         return merged
 
     # ------------------------------------------------------------
@@ -472,6 +595,10 @@ class MarkdownChunker:
 
         if self.config.merge_short_chunks:
             chunks = self._merge_short_chunks(chunks)
+
+        # 4. PLACE THE CALL HERE (Before indexing)
+        # This cleans every chunk line-by-line
+        chunks = [self._remove_corrupted_latex(c) for c in chunks]
 
         for idx, chunk in enumerate(chunks):
             chunk["chunk_index"] = idx
