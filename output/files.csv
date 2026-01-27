@@ -1,2 +1,2 @@
 file_id,file_path,file_name,simhash,format,title,author,subject,keywords,creator,producer,creation_date,mod_date,trapped,encryption,processed_at,content_length
-28c7ab28-a28e-491b-9f61-b66e34391df7,/home/copper/Documents/TRAIN_LLM_WB.pdf,TRAIN_LLM_WB.pdf,69c12d4657c6fd13,PDF 1.4,,,,,Adobe InDesign 18.2 (Windows),Adobe PDF Library 17.0,D:20230410140203-07'00',D:20230410140206-07'00',,None,2026-01-08T19:52:43.665563,76970
+c84c735d-9f17-4d42-adcf-c64bf8b27ef3,/home/copper/Study/necessessities/fairmlbook.pdf,fairmlbook.pdf,ebc509e55547c717,PDF 1.5,Fairness and Machine Learning,"Solon Barocas, Moritz Hardt, Arvind Narayanan",,,LaTeX with hyperref,pdfTeX-1.40.22,D:20231213144507+01'00',D:20231213144507+01'00',,None,2026-01-19T00:32:51.646724,921742

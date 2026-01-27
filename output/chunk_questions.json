@@ -1,0 +1,506 @@
+[
+  {
+    "question_id": "5c3f787d-d23e-48ae-931b-a7b221c8c0bd_fee8c030",
+    "chunk_id": "5c3f787d-d23e-48ae-931b-a7b221c8c0bd",
+    "question_text": "What is the peculiar way of making decisions characteristic of modern society?",
+    "answer_text": "It is the use of institutions to represent populations as data tables.",
+    "difficulty": "Easy",
+    "question_type": "Fact"
+  },
+  {
+    "question_id": "5c3f787d-d23e-48ae-931b-a7b221c8c0bd_301790c4",
+    "chunk_id": "5c3f787d-d23e-48ae-931b-a7b221c8c0bd",
+    "question_text": "How does machine learning share long established decision-theoretic foundations with large parts of statistics, economics, and computer science?",
+    "answer_text": "Machine learning builds upon the foundations laid by these disciplines, adding a rapidly growing repertoire of heuristics for fitting large datasets.",
+    "difficulty": "Medium",
+    "question_type": "Mechanism"
+  },
+  {
+    "question_id": "5c3f787d-d23e-48ae-931b-a7b221c8c0bd_0a767d7c",
+    "chunk_id": "5c3f787d-d23e-48ae-931b-a7b221c8c0bd",
+    "question_text": "Why would you choose machine learning over statistical decision making?",
+    "answer_text": "Machine learning can produce more accurate models from large datasets, leading to more effective decision-making in some applications.",
+    "difficulty": "Hard",
+    "question_type": "Trade-off"
+  },
+  {
+    "question_id": "c7df4608-f832-486a-889f-8da6de6d391e_6ab2b257",
+    "chunk_id": "c7df4608-f832-486a-889f-8da6de6d391e",
+    "question_text": "What is the book about?",
+    "answer_text": "The book discusses the evolution of decision-making in modern society, focusing on statistical and machine learning techniques.",
+    "difficulty": "Easy",
+    "question_type": "Fact"
+  },
+  {
+    "question_id": "c7df4608-f832-486a-889f-8da6de6d391e_43b9798f",
+    "chunk_id": "c7df4608-f832-486a-889f-8da6de6d391e",
+    "question_text": "How does machine learning work?",
+    "answer_text": "Machine learning works by enabling systems to learn from data, identify patterns, and make decisions without explicit instructions.",
+    "difficulty": "Medium",
+    "question_type": "Mechanism"
+  },
+  {
+    "question_id": "c7df4608-f832-486a-889f-8da6de6d391e_4c98a9f9",
+    "chunk_id": "c7df4608-f832-486a-889f-8da6de6d391e",
+    "question_text": "Why would you choose fairness over accuracy?",
+    "answer_text": "You might choose fairness over accuracy because fairness is an active research area that is far from settled, and fairness-promoting algorithmic interventions are proposed in the text.",
+    "difficulty": "Hard",
+    "question_type": "Trade-off"
+  },
+  {
+    "question_id": "1e2b4a34-38fa-4cef-b467-b1515153f7d6_f3aa3575",
+    "chunk_id": "1e2b4a34-38fa-4cef-b467-b1515153f7d6",
+    "question_text": "What is the role of statistics in decision-making?",
+    "answer_text": "Statistics is used to quantify the relationship between certain factors and an outcome of interest.",
+    "difficulty": "Easy",
+    "question_type": "Fact"
+  },
+  {
+    "question_id": "1e2b4a34-38fa-4cef-b467-b1515153f7d6_8972dc15",
+    "chunk_id": "1e2b4a34-38fa-4cef-b467-b1515153f7d6",
+    "question_text": "How does machine learning uncover patterns in historical evidence?",
+    "answer_text": "Machine learning lets us defer the question of relevance to the data themselves, uncovering factors that are relevant to decision-making.",
+    "difficulty": "Medium",
+    "question_type": "Mechanism"
+  },
+  {
+    "question_id": "1e2b4a34-38fa-4cef-b467-b1515153f7d6_79eba333",
+    "chunk_id": "1e2b4a34-38fa-4cef-b467-b1515153f7d6",
+    "question_text": "Why would you choose machine learning over traditional statistical methods?",
+    "answer_text": "Because machine learning can uncover patterns in historical evidence that might be overlooked by traditional statistical methods, leading to more accurate and fair decision-making.",
+    "difficulty": "Hard",
+    "question_type": "Trade-off"
+  },
+  {
+    "question_id": "53648c9d-0b4c-4596-bdea-f4c20cf78512_7e9289a3",
+    "chunk_id": "53648c9d-0b4c-4596-bdea-f4c20cf78512",
+    "question_text": "What is the term used to refer to demographic disparities in algorithmic systems that are objectionable for societal reasons?",
+    "answer_text": "Bias",
+    "difficulty": "Easy",
+    "question_type": "Fact"
+  },
+  {
+    "question_id": "53648c9d-0b4c-4596-bdea-f4c20cf78512_84e8716c",
+    "chunk_id": "53648c9d-0b4c-4596-bdea-f4c20cf78512",
+    "question_text": "How does Amazon's system determine the neighborhoods in which to offer free same-day delivery?",
+    "answer_text": "Amazon uses a data-driven system to determine the neighborhoods in which to offer free same-day delivery.",
+    "difficulty": "Medium",
+    "question_type": "Mechanism"
+  },
+  {
+    "question_id": "53648c9d-0b4c-4596-bdea-f4c20cf78512_381820a9",
+    "chunk_id": "53648c9d-0b4c-4596-bdea-f4c20cf78512",
+    "question_text": "Why would you choose statistical bias over racial disparities?",
+    "answer_text": "Statistical bias is a fundamental concept in statistics, and ther",
+    "difficulty": "Hard",
+    "question_type": "Trade-off"
+  },
+  {
+    "question_id": "5ffcf616-aba2-4614-b280-77e427b1633a_7e5c44e8",
+    "chunk_id": "5ffcf616-aba2-4614-b280-77e427b1633a",
+    "question_text": "What is the first stage of the machine learning loop?",
+    "answer_text": "Measurement",
+    "difficulty": "Easy",
+    "question_type": "Fact"
+  },
+  {
+    "question_id": "5ffcf616-aba2-4614-b280-77e427b1633a_4f9add4d",
+    "chunk_id": "5ffcf616-aba2-4614-b280-77e427b1633a",
+    "question_text": "How does the model creation stage work?",
+    "answer_text": "It summarizes patterns in the training data and makes generalizations.",
+    "difficulty": "Medium",
+    "question_type": "Mechanism"
+  },
+  {
+    "question_id": "5ffcf616-aba2-4614-b280-77e427b1633a_b450a0cd",
+    "chunk_id": "5ffcf616-aba2-4614-b280-77e427b1633a",
+    "question_text": "Why would you choose supervised learning over unsupervised learning?",
+    "answer_text": "Supervised learning is more effective when the model is trained using labeled data, which is often available.",
+    "difficulty": "Hard",
+    "question_type": "Trade-off"
+  },
+  {
+    "question_id": "9337cf8b-808b-4088-bfa0-8f941d766f6e_6d47301c",
+    "chunk_id": "9337cf8b-808b-4088-bfa0-8f941d766f6e",
+    "question_text": "What is the main focus of the book?",
+    "answer_text": "The main focus is on applications of machine learning that involve data about people.",
+    "difficulty": "Easy",
+    "question_type": "Fact"
+  },
+  {
+    "question_id": "9337cf8b-808b-4088-bfa0-8f941d766f6e_5b41ae46",
+    "chunk_id": "9337cf8b-808b-4088-bfa0-8f941d766f6e",
+    "question_text": "How does the gender breakdown of occupations in the United States reflect the data?",
+    "answer_text": "The figure shows the gender breakdown of a sample of occupations in the United States, based on data released by the Bureau of Labor Statistics for the year 2017. The area of the bubble represents the number of workers.",
+    "difficulty": "Medium",
+    "question_type": "Mechanism"
+  },
+  {
+    "question_id": "9337cf8b-808b-4088-bfa0-8f941d766f6e_641b6ceb",
+    "chunk_id": "9337cf8b-808b-4088-bfa0-8f941d766f6e",
+    "question_text": "Why would you choose to integrate machine learning into infrastructure improvement over other applications?",
+    "answer_text": "Because the data reflects the patterns of smartphone ownership, which are higher in wealthier parts of the city compared to lower-income areas and areas with large elderly populations. This reflects demographic disparities and affects people's lives.",
+    "difficulty": "Hard",
+    "question_type": "Trade-off"
+  },
+  {
+    "question_id": "7abf59df-3380-469d-9e79-a74992f2a54f_0cece1a4",
+    "chunk_id": "7abf59df-3380-469d-9e79-a74992f2a54f",
+    "question_text": "What is the term measurement suggest?",
+    "answer_text": "It suggests a straightforward process, calling to mind a camera objectively recording a scene.",
+    "difficulty": "Easy",
+    "question_type": "Fact"
+  },
+  {
+    "question_id": "7abf59df-3380-469d-9e79-a74992f2a54f_4aadaf25",
+    "chunk_id": "7abf59df-3380-469d-9e79-a74992f2a54f",
+    "question_text": "How does the term measurement suggest a straightforward process?",
+    "answer_text": "It suggests a straightforward process by calling to mind a camera objectively recording a scene.",
+    "difficulty": "Medium",
+    "question_type": "Mechanism"
+  },
+  {
+    "question_id": "7abf59df-3380-469d-9e79-a74992f2a54f_6a5c80a2",
+    "chunk_id": "7abf59df-3380-469d-9e79-a74992f2a54f",
+    "question_text": "Why would you choose multiracial over multiracial?",
+    "answer_text": "Because multiracial is a category introduced in 2008 to include individuals with mixed racial backgrounds, and it may affect the percentages of 'White' and 'Black' students at universities.",
+    "difficulty": "Hard",
+    "question_type": "Trade-off"
+  },
+  {
+    "question_id": "26e2b131-5905-4035-b211-817e167b2545_757c9ef5",
+    "chunk_id": "26e2b131-5905-4035-b211-817e167b2545",
+    "question_text": "What is the main issue discussed in the text?",
+    "answer_text": "The main issue discussed is the biases and distortions in training data and how machine learning models can extract these biases.",
+    "difficulty": "Easy",
+    "question_type": "Fact"
+  },
+  {
+    "question_id": "26e2b131-5905-4035-b211-817e167b2545_6a732f80",
+    "chunk_id": "26e2b131-5905-4035-b211-817e167b2545",
+    "question_text": "How does machine learning extract knowledge from the training data?",
+    "answer_text": "Machine learning extracts knowledge from the training data by learning patterns and relationships from the data, which can include biases and distortions.",
+    "difficulty": "Medium",
+    "question_type": "Mechanism"
+  },
+  {
+    "question_id": "26e2b131-5905-4035-b211-817e167b2545_6aadd02f",
+    "chunk_id": "26e2b131-5905-4035-b211-817e167b2545",
+    "question_text": "Why would you choose to build a model that optimizes calibration over one that does not?",
+    "answer_text": "You would choose to build a model that optimizes calibration over one that does not because calibration ensures that the model's prediction subsumes all features in the data for the purpose of predicting the outcome, which is important for accurate predictions.",
+    "difficulty": "Hard",
+    "question_type": "Trade-off"
+  },
+  {
+    "question_id": "926d51d0-77d9-45f8-8d69-6390c307a628_8b4c44b5",
+    "chunk_id": "926d51d0-77d9-45f8-8d69-6390c307a628",
+    "question_text": "What is the context in which predictions are made?",
+    "answer_text": "In the context of the larger socio-technical system in which the machine learning system is embedded.",
+    "difficulty": "Easy",
+    "question_type": "Fact"
+  },
+  {
+    "question_id": "926d51d0-77d9-45f8-8d69-6390c307a628_f29dc21d",
+    "chunk_id": "926d51d0-77d9-45f8-8d69-6390c307a628",
+    "question_text": "How does a model's calibration affect predictions?",
+    "answer_text": "If a model is calibrated, predictions made using that model will have disparate error rates for different groups, due to different base rates.",
+    "difficulty": "Medium",
+    "question_type": "Mechanism"
+  },
+  {
+    "question_id": "926d51d0-77d9-45f8-8d69-6390c307a628_f9ce4b55",
+    "chunk_id": "926d51d0-77d9-45f8-8d69-6390c307a628",
+    "question_text": "Why would you choose an ethical decision-making process over a black-box model?",
+    "answer_text": "An ethical decision-making process requires the ability to explain a prediction or decision, which might not be feasible with black-box models.",
+    "difficulty": "Hard",
+    "question_type": "Trade-off"
+  },
+  {
+    "question_id": "73a46aa6-b4d9-47fc-aff2-4621040faed5_caa5b3c4",
+    "chunk_id": "73a46aa6-b4d9-47fc-aff2-4621040faed5",
+    "question_text": "What is implicit signals?",
+    "answer_text": "Implicit signals are the links that the user clicks on and how long the user spends on those pages, recorded by a search engine when it serves results.",
+    "difficulty": "Easy",
+    "question_type": "Fact"
+  },
+  {
+    "question_id": "73a46aa6-b4d9-47fc-aff2-4621040faed5_7f73915a",
+    "chunk_id": "73a46aa6-b4d9-47fc-aff2-4621040faed5",
+    "question_text": "How does the search engine use implicit signals?",
+    "answer_text": "The search engine uses the links that the user clicks on and how long the user spends on those pages as implicit signals about which results were found to be most relevant.",
+    "difficulty": "Medium",
+    "question_type": "Mechanism"
+  },
+  {
+    "question_id": "73a46aa6-b4d9-47fc-aff2-4621040faed5_7030abc0",
+    "chunk_id": "73a46aa6-b4d9-47fc-aff2-4621040faed5",
+    "question_text": "Why would you choose self-fulfilling predictions over other methods?",
+    "answer_text": "Self-fulfilling predictions are chosen because they can lead to unexpected or undesirable biases, making them a potential solution to the problem of unintended feedback.",
+    "difficulty": "Hard",
+    "question_type": "Trade-off"
+  },
+  {
+    "question_id": "ef7831c9-7a6c-40cf-bb85-f98df0ce30ef_98b096ed",
+    "chunk_id": "ef7831c9-7a6c-40cf-bb85-f98df0ce30ef",
+    "question_text": "What is the task of the hiring committee?",
+    "answer_text": "The task is to use the two variables (GPA and interview score) to predict the 'quality' of an applicant.",
+    "difficulty": "Easy",
+    "question_type": "Fact"
+  },
+  {
+    "question_id": "ef7831c9-7a6c-40cf-bb85-f98df0ce30ef_366dc917",
+    "chunk_id": "ef7831c9-7a6c-40cf-bb85-f98df0ce30ef",
+    "question_text": "How does the hiring classifier work?",
+    "answer_text": "The hiring classifier uses linear regression to predict the average job performance rating based on GPA and interview score, and then applies a cutoff based on the number of candidates to be hired.",
+    "difficulty": "Medium",
+    "question_type": "Mechanism"
+  },
+  {
+    "question_id": "ef7831c9-7a6c-40cf-bb85-f98df0ce30ef_4d179b49",
+    "chunk_id": "ef7831c9-7a6c-40cf-bb85-f98df0ce30ef",
+    "question_text": "Why would you choose a model that doesn't use group membership in the regression?",
+    "answer_text": "You would choose such a model because it is impartial and does not use the group membership in the regression, which is fair; a model that gives different scores to otherwise-identical members of different groups is discriminatory.",
+    "difficulty": "Hard",
+    "question_type": "Trade-off"
+  },
+  {
+    "question_id": "4edab167-145b-45cb-b44c-8c322016e721_a597975d",
+    "chunk_id": "4edab167-145b-45cb-b44c-8c322016e721",
+    "question_text": "What is the core concern of this book?",
+    "answer_text": "The core concern of this book is group disparities in decision making.",
+    "difficulty": "Easy",
+    "question_type": "Fact"
+  },
+  {
+    "question_id": "4edab167-145b-45cb-b44c-8c322016e721_85eb5cfe",
+    "chunk_id": "4edab167-145b-45cb-b44c-8c322016e721",
+    "question_text": "How does the book suggest we address ethical obligations beyond just addressing disparities?",
+    "answer_text": "The book suggests that we need to change the conditions under which decisions are made, not just address disparities.",
+    "difficulty": "Medium",
+    "question_type": "Mechanism"
+  },
+  {
+    "question_id": "4edab167-145b-45cb-b44c-8c322016e721_b6a8023e",
+    "chunk_id": "4edab167-145b-45cb-b44c-8c322016e721",
+    "question_text": "Why would you choose to change the conditions under which decisions are made over just addressing disparities?",
+    "answer_text": "You would choose to change the conditions under which decisions are made over just addressing disparities because fairly rendered decisions under unfair circumstances may do little to improve people's lives, and in many cases, the very purpose of the system might be oppressive.",
+    "difficulty": "Hard",
+    "question_type": "Trade-off"
+  },
+  {
+    "question_id": "6eb2c34c-9c91-4685-bd4c-b232b2d2581b_8b8613d5",
+    "chunk_id": "6eb2c34c-9c91-4685-bd4c-b232b2d2581b",
+    "question_text": "What is the social model of disability?",
+    "answer_text": "It views a predicted difference in a disabled person's ability to excel on the job as the result of a lack of appropriate accommodations (an accessible workplace, necessary equipment, flexible working arrangements) rather than any inherent capacity of the person.",
+    "difficulty": "Easy",
+    "question_type": "Fact"
+  },
+  {
+    "question_id": "6eb2c34c-9c91-4685-bd4c-b232b2d2581b_fe29f96c",
+    "chunk_id": "6eb2c34c-9c91-4685-bd4c-b232b2d2581b",
+    "question_text": "How does the social model of disability work?",
+    "answer_text": "It works by identifying the lack of appropriate accommodations as the cause of the difference in ability, rather than any inherent capacity of the person.",
+    "difficulty": "Medium",
+    "question_type": "Mechanism"
+  },
+  {
+    "question_id": "6eb2c34c-9c91-4685-bd4c-b232b2d2581b_9f8753b8",
+    "chunk_id": "6eb2c34c-9c91-4685-bd4c-b232b2d2581b",
+    "question_text": "Why would you choose to regulate the police's access to facial recognition technology?",
+    "answer_text": "You would choose to regulate the police's access to facial recognition technology because it poses a threat to the legitimacy of an automated decision-making system, as it both fails and works well, and it is concerned with the civil rights and movement and association freedoms of people.",
+    "difficulty": "Hard",
+    "question_type": "Trade-off"
+  },
+  {
+    "question_id": "3a3bd4e2-40b7-4674-9483-56ab2d1aa63a_e656d476",
+    "chunk_id": "3a3bd4e2-40b7-4674-9483-56ab2d1aa63a",
+    "question_text": "What is an example of representational harm?",
+    "answer_text": "The text provides an example of how online translation reinforces gender stereotypes.",
+    "difficulty": "Easy",
+    "question_type": "Fact"
+  },
+  {
+    "question_id": "3a3bd4e2-40b7-4674-9483-56ab2d1aa63a_c5d7ccd5",
+    "chunk_id": "3a3bd4e2-40b7-4674-9483-56ab2d1aa63a",
+    "question_text": "How does image search results for occupation terms reflect gender stereotypes?",
+    "answer_text": "Image search results for occupation terms such as CEO or software developer reflect and arguably exaggerate the prevailing gender composition and stereotypes about those occupations.",
+    "difficulty": "Medium",
+    "question_type": "Mechanism"
+  },
+  {
+    "question_id": "3a3bd4e2-40b7-4674-9483-56ab2d1aa63a_ec03e3d1",
+    "chunk_id": "3a3bd4e2-40b7-4674-9483-56ab2d1aa63a",
+    "question_text": "Why would you choose allocative harms over representational harms?",
+    "answer_text": "Allocative harms have immediate and tangible consequences, while representational harms have long-term effects and resist formal characterization.",
+    "difficulty": "Hard",
+    "question_type": "Trade-off"
+  },
+  {
+    "question_id": "51173e3e-513d-42c7-98b2-16d310a9726e_478715b1",
+    "chunk_id": "51173e3e-513d-42c7-98b2-16d310a9726e",
+    "question_text": "What is the main goal of fair machine learning?",
+    "answer_text": "To develop an understanding of when these disparities are harmful, unjustified, or otherwise unacceptable, and to develop interventions to mitigate such disparities.",
+    "difficulty": "Easy",
+    "question_type": "Fact"
+  },
+  {
+    "question_id": "51173e3e-513d-42c7-98b2-16d310a9726e_31af8407",
+    "chunk_id": "51173e3e-513d-42c7-98b2-16d310a9726e",
+    "question_text": "How does unbiased measurement work?",
+    "answer_text": "Unbiased measurement might be infeasible even in principle, such as when the construct itself (e.g. race) is unstable.",
+    "difficulty": "Medium",
+    "question_type": "Mechanism"
+  },
+  {
+    "question_id": "51173e3e-513d-42c7-98b2-16d310a9726e_bb3bc875",
+    "chunk_id": "51173e3e-513d-42c7-98b2-16d310a9726e",
+    "question_text": "Why would you choose unbiased measurement over other methods?",
+    "answer_text": "Unbiased measurement might be infeasible even in principle, such as when the construct itself (e.g. race) is unstable. There are additional practical limitations arising from the fact that the decision maker is typically not involved in the measurement stage. Further, observational data can be insufficient to identify the causes of disparities, which is needed in the design of meaningful interventions and in order to understand the effects of intervention.",
+    "difficulty": "Hard",
+    "question_type": "Trade-off"
+  },
+  {
+    "question_id": "dc018991-f446-49cd-8434-9b0b5c7ba6c3_1cf44055",
+    "chunk_id": "dc018991-f446-49cd-8434-9b0b5c7ba6c3",
+    "question_text": "What is a blog post by Moritz Hardt?",
+    "answer_text": "It is a blog post.",
+    "difficulty": "Easy",
+    "question_type": "Fact"
+  },
+  {
+    "question_id": "dc018991-f446-49cd-8434-9b0b5c7ba6c3_d02f3db3",
+    "chunk_id": "dc018991-f446-49cd-8434-9b0b5c7ba6c3",
+    "question_text": "How does the FAT/ML workshop contribute to the topic?",
+    "answer_text": "It contributes to the topic by establishing a new community.",
+    "difficulty": "Medium",
+    "question_type": "Mechanism"
+  },
+  {
+    "question_id": "dc018991-f446-49cd-8434-9b0b5c7ba6c3_314f3b85",
+    "chunk_id": "dc018991-f446-49cd-8434-9b0b5c7ba6c3",
+    "question_text": "Why would you choose the FAT/ML workshop over the AI Now report?",
+    "answer_text": "Because the FAT/ML workshop is more recent and established as a new community.",
+    "difficulty": "Hard",
+    "question_type": "Trade-off"
+  },
+  {
+    "question_id": "10b489a1-36f4-4d05-84eb-b0304a50d8c8_e47c3d5a",
+    "chunk_id": "10b489a1-36f4-4d05-84eb-b0304a50d8c8",
+    "question_text": "What is the commonality among the three scenarios?",
+    "answer_text": "All three scenarios involve automated decision-making systems that are perceived as unfair or unjust.",
+    "difficulty": "Easy",
+    "question_type": "Fact"
+  },
+  {
+    "question_id": "10b489a1-36f4-4d05-84eb-b0304a50d8c8_5bb1b479",
+    "chunk_id": "10b489a1-36f4-4d05-84eb-b0304a50d8c8",
+    "question_text": "How does a criminal risk prediction system categorize a defendant as high risk?",
+    "answer_text": "The system categorizes the defendant as high risk based on the behavior of others like him, despite the defendant having every intention of appearing in court on the appointed date.",
+    "difficulty": "Medium",
+    "question_type": "Mechanism"
+  },
+  {
+    "question_id": "10b489a1-36f4-4d05-84eb-b0304a50d8c8_d16b9018",
+    "chunk_id": "10b489a1-36f4-4d05-84eb-b0304a50d8c8",
+    "question_text": "Why would you choose a system that categorizes a defendant as high risk over one that categorizes them as low risk?",
+    "answer_text": "You would choose the high-risk system because it is perceived as fairer, aligning with the defendant's intentions and behavior.",
+    "difficulty": "Hard",
+    "question_type": "Trade-off"
+  },
+  {
+    "question_id": "6d9410cf-ead0-461e-8d2d-f9874bc9fd7f_4769a2b2",
+    "chunk_id": "6d9410cf-ead0-461e-8d2d-f9874bc9fd7f",
+    "question_text": "What is the role of machine learning in high-stakes decisions?",
+    "answer_text": "Machine learning plays an important role in decisions that allocate resources and opportunities that are critical to people's life chances.",
+    "difficulty": "Easy",
+    "question_type": "Fact"
+  },
+  {
+    "question_id": "6d9410cf-ead0-461e-8d2d-f9874bc9fd7f_f57b1151",
+    "chunk_id": "6d9410cf-ead0-461e-8d2d-f9874bc9fd7f",
+    "question_text": "How does machine learning work?",
+    "answer_text": "Machine learning models are trained on large datasets to learn patterns and make predictions.",
+    "difficulty": "Medium",
+    "question_type": "Mechanism"
+  },
+  {
+    "question_id": "6d9410cf-ead0-461e-8d2d-f9874bc9fd7f_65e90103",
+    "chunk_id": "6d9410cf-ead0-461e-8d2d-f9874bc9fd7f",
+    "question_text": "Why would you choose procedural protections over human decision-making in bureaucracies?",
+    "answer_text": "Because procedural protections ensure transparency, relevant information, and challenge and correction, which can prevent the inscrutability and bias of human decision-making.",
+    "difficulty": "Hard",
+    "question_type": "Trade-off"
+  },
+  {
+    "question_id": "a9588d6b-a997-4155-ba0b-0350016139b9_9f2f833e",
+    "chunk_id": "a9588d6b-a997-4155-ba0b-0350016139b9",
+    "question_text": "What is arbitrariness?",
+    "answer_text": "Arbitrariness is a type of decision-making that can be protected against by bureaucracies.",
+    "difficulty": "Easy",
+    "question_type": "Fact"
+  },
+  {
+    "question_id": "a9588d6b-a997-4155-ba0b-0350016139b9_d07cb3cf",
+    "chunk_id": "a9588d6b-a997-4155-ba0b-0350016139b9",
+    "question_text": "How does arbitrariness manifest in decision-making?",
+    "answer_text": "Arbitrariness can manifest as decisions made on an inconsistent or ad hoc basis or decisions lacking reasoning, even if they are made consistently.",
+    "difficulty": "Medium",
+    "question_type": "Mechanism"
+  },
+  {
+    "question_id": "a9588d6b-a997-4155-ba0b-0350016139b9_9dd24c33",
+    "chunk_id": "a9588d6b-a997-4155-ba0b-0350016139b9",
+    "question_text": "Why would you choose procedural consistency over arbitrariness?",
+    "answer_text": "Procedural consistency ensures that decisions are made correctly and consistently, reducing the risk of arbitrary decision-making. However, arbitrariness can be justified for important decisions, especially when the basis for decision-making is unclear.",
+    "difficulty": "Hard",
+    "question_type": "Trade-off"
+  },
+  {
+    "question_id": "e89f6def-154d-4717-9200-c1bbf3250590_d9c25448",
+    "chunk_id": "e89f6def-154d-4717-9200-c1bbf3250590",
+    "question_text": "What is the first kind of automation?",
+    "answer_text": "It involves taking decision-making rules that have been set down by hand and translating them into software.",
+    "difficulty": "Easy",
+    "question_type": "Fact"
+  },
+  {
+    "question_id": "e89f6def-154d-4717-9200-c1bbf3250590_be3973eb",
+    "chunk_id": "e89f6def-154d-4717-9200-c1bbf3250590",
+    "question_text": "How does the second kind of automation work?",
+    "answer_text": "It uses machine learning to figure out how to replicate the informal judgments of humans and then implements this scheme in software to replace the humans who had been making these decisions.",
+    "difficulty": "Medium",
+    "question_type": "Mechanism"
+  },
+  {
+    "question_id": "e89f6def-154d-4717-9200-c1bbf3250590_7ce69749",
+    "chunk_id": "e89f6def-154d-4717-9200-c1bbf3250590",
+    "question_text": "Why would you choose the third kind of automation over the other two?",
+    "answer_text": "Because it involves learning decision-making rules from data, which can lead to more accurate and personalized decisions.",
+    "difficulty": "Hard",
+    "question_type": "Trade-off"
+  },
+  {
+    "question_id": "1d6704d7-506b-49ce-a149-83ada942af8a_d9be46e4",
+    "chunk_id": "1d6704d7-506b-49ce-a149-83ada942af8a",
+    "question_text": "What is the first form of automation?",
+    "answer_text": "Translating pre-existing rules into software so that decisions can be executed automatically.",
+    "difficulty": "Easy",
+    "question_type": "Fact"
+  },
+  {
+    "question_id": "1d6704d7-506b-49ce-a149-83ada942af8a_ad6e532f",
+    "chunk_id": "1d6704d7-506b-49ce-a149-83ada942af8a",
+    "question_text": "How does automating decision-making rules work?",
+    "answer_text": "Automating decision-making rules involves translating the rules into code, ensuring consistency and uniform application.",
+    "difficulty": "Medium",
+    "question_type": "Mechanism"
+  },
+  {
+    "question_id": "1d6704d7-506b-49ce-a149-83ada942af8a_b1f996fb",
+    "chunk_id": "1d6704d7-506b-49ce-a149-83ada942af8a",
+    "question_text": "Why would you choose manual review over automated decision-making?",
+    "answer_text": "Manual review allows for discretion and the consideration of additional details that might not have been anticipated at the time of software development.",
+    "difficulty": "Hard",
+    "question_type": "Trade-off"
+  }
+]

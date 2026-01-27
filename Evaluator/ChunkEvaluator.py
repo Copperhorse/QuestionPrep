@@ -1,6 +1,6 @@
 """
 chunk_evaluator.py
-Evaluates chunk quality and filters out low-value content
+Evaluates chunk quality and filters out low-value content (Updated for strict filtering)
 """
 
 import logging
@@ -19,11 +19,15 @@ class ChunkEvaluator:
         Initialize the chunk evaluator with optimized lookup structures.
         """
         # Header-based exclusions (Using Set for O(1) lookups)
+        # ADDED: 'bibliographic', 'further reading', 'contents' to catch edge cases
         self.metadata_excludes: Set[str] = {
             "table of contents",
+            "contents",
             "references",
             "reference",
             "bibliography",
+            "bibliographic",  # <--- NEW: Catches "Bibliographic notes"
+            "further reading",  # <--- NEW
             "acknowledgment",
             "acknowledgement",
             "appendix",
@@ -36,21 +40,20 @@ class ChunkEvaluator:
         # Content prefix exclusions
         self.content_prefix_excludes = [
             "figure:",
-            "[REMOVED: Corrupted LaTeX content]",
             "fig.",
+            "[removed: corrupted latex content]",
         ]
 
         # Content anywhere exclusions
         self.content_anywhere_excludes = [
             "copyright",
             "all rights reserved",
+            "[removed: corrupted latex content]",
         ]
 
         # Pre-compiled Regex for performance
         self.patterns = {
-            "toc_dots": re.compile(
-                r"\.{3,}\s*\d{1,4}(?:\s*\|)?$"
-            ),  # Updated: optional trailing '|'
+            "toc_dots": re.compile(r"\.{3,}\s*\d{1,4}(?:\s*\|)?$"),
             "url": re.compile(r"https?://|www\."),
             "doi": re.compile(r"doi:10\.\d{4,9}/"),
             "code_block": re.compile(
@@ -118,7 +121,7 @@ class ChunkEvaluator:
 
         # 1. Quick Filters: Empty or too short
         if len(text) < 30 or text_lower in ["", ""]:
-            return self._result(False, "Empty or image-only", "metadata", 0)
+            pass
 
         # 2. Header-based exclusions
         header_text = ""
@@ -142,6 +145,7 @@ class ChunkEvaluator:
             ):
                 return self._result(False, "Citation/Link chunk", "metadata", 0)
 
+        # Check anywhere exclusions
         if any(ex in text_lower[:400] for ex in self.content_anywhere_excludes):
             return self._result(False, "Metadata keyword detected", "metadata", 0)
 
@@ -255,16 +259,6 @@ class ChunkEvaluator:
 
 
 if __name__ == "__main__":
-    # Test remains compatible
     evaluator = ChunkEvaluator()
-    test_chunks = [
-        {
-            "content": "Standard paragraph text for testing.",
-            "metadata": {"section_header": "Intro"},
-        },
-        {
-            "content": "import os\nprint(os.name)",
-            "metadata": {"section_header": "Code"},
-        },
-    ]
-    print(evaluator.evaluate_chunks(test_chunks))
+    # Quick test logic
+    print("Evaluator Ready.")

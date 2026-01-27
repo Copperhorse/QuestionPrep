@@ -1,0 +1,170 @@
+[
+  {
+    "chunk_id": "5c3f787d-d23e-48ae-931b-a7b221c8c0bd",
+    "tags": "[\"decision-making\", \"statistics\", \"machine-learning\", \"artificial-intelligence\", \"ethics\"]",
+    "triplets": "[{\"subject\": \"decision-making\", \"predicate\": \"uses\", \"object\": \"statistical models\"}, {\"subject\": \"machine-learning\", \"predicate\": \"defined_as\", \"object\": \"a subset of artificial intelligence\"}, {\"subject\": \"artificial-intelligence\", \"predicate\": \"calls\", \"object\": \"machine-learning\"}, {\"subject\": \"ethics\", \"predicate\": \"enables\", \"object\": \"machine-learning\"}, {\"subject\": \"statistical models\", \"predicate\": \"part_of\", \"object\": \"decision-making\"}]",
+    "summary": "The text discusses the evolution of decision-making in modern society, focusing on statistical and machine learning techniques. It highlights the historical and current applications of these methods, including their use in insurance, finance, and warfare. The text also touches on the ethical and political implications of these technologies.",
+    "questions": "[]",
+    "processed_at": "2026-01-20T10:42:26.803397"
+  },
+  {
+    "chunk_id": "c7df4608-f832-486a-889f-8da6de6d391e",
+    "tags": "[\"decision-making\", \"statistical\", \"machine-learning\", \"ethics\", \"politics\"]",
+    "triplets": "[{\"subject\": \"decision-making\", \"predicate\": \"defined_as\", \"object\": \"the process of making choices or decisions\"}, {\"subject\": \"statistical\", \"predicate\": \"uses\", \"object\": \"data analysis\"}, {\"subject\": \"machine-learning\", \"predicate\": \"defined_as\", \"object\": \"a subset of artificial intelligence that enables systems to learn from data, identify patterns, and make decisions without explicit instructions\"}, {\"subject\": \"ethics\", \"predicate\": \"part_of\", \"object\": \"the study of moral principles and their application\"}, {\"subject\": \"politics\", \"predicate\": \"part_of\", \"object\": \"the study of government and politics\"}]",
+    "summary": "The book discusses the evolution of decision-making in modern society, focusing on statistical and machine learning techniques. It highlights the historical and current applications of these methods, including their use in insurance, finance, and warfare. The text also touches on the ethical and political implications of these technologies.",
+    "questions": "[]",
+    "processed_at": "2026-01-20T10:43:50.358236"
+  },
+  {
+    "chunk_id": "1e2b4a34-38fa-4cef-b467-b1515153f7d6",
+    "tags": "[\"decision-making\", \"statistics\", \"machine learning\", \"fairness\", \"accuracy\"]",
+    "triplets": "[{\"subject\": \"decision-making\", \"predicate\": \"uses\", \"object\": \"statistics\"}, {\"subject\": \"statistics\", \"predicate\": \"defined_as\", \"object\": \"quantifying the relationship between certain factors and an outcome of interest\"}, {\"subject\": \"machine learning\", \"predicate\": \"produces\", \"object\": \"patterns in historical evidence\"}, {\"subject\": \"fairness\", \"predicate\": \"optimizes\", \"object\": \"accuracy\"}, {\"subject\": \"accuracy\", \"predicate\": \"is_a\", \"object\": \"quality of decision-making\"}]",
+    "summary": "The text discusses the importance of decision-making, the role of statistics and machine learning in ensuring fair and accurate decisions, and the challenges in identifying relevant factors for decision-making.",
+    "questions": "[]",
+    "processed_at": "2026-01-20T10:45:10.557381"
+  },
+  {
+    "chunk_id": "53648c9d-0b4c-4596-bdea-f4c20cf78512",
+    "tags": "[\"demographic_disparities\", \"machine_learning\", \"bias\"]",
+    "triplets": "[{\"subject\": \"demographic disparities\", \"predicate\": \"is_a\", \"object\": \"machine learning system\"}, {\"subject\": \"machine learning system\", \"predicate\": \"defined_as\", \"object\": \"system that uses data-driven methods\"}, {\"subject\": \"Amazon's same-day delivery system\", \"predicate\": \"uses\", \"object\": \"data-driven system\"}, {\"subject\": \"racial disparities\", \"predicate\": \"is_a\", \"object\": \"demographic disparities\"}, {\"subject\": \"statistical bias\", \"predicate\": \"is_a\", \"object\": \"statistical estimator\"}, {\"subject\": \"zip code\", \"predicate\": \"part_of\", \"object\": \"neighborhood\"}]",
+    "summary": "This chapter discusses the concept of demographic disparities in machine learning systems, focusing on Amazon's same-day delivery system and the racial disparities observed in its neighborhoods. The text explores the mathematical precision of measuring these disparities and the importance of understanding whether they are justified and harmful.",
+    "questions": "[]",
+    "processed_at": "2026-01-20T10:46:28.176457"
+  },
+  {
+    "chunk_id": "5ffcf616-aba2-4614-b280-77e427b1633a",
+    "tags": "[\"machine learning\", \"data science\", \"algorithm\"]",
+    "triplets": "[{\"subject\": \"measurement\", \"predicate\": \"is_a\", \"object\": \"data reduction\"}, {\"subject\": \"model\", \"predicate\": \"defined_as\", \"object\": \"pattern summary\"}, {\"subject\": \"action\", \"predicate\": \"produces\", \"object\": \"system state change\"}]",
+    "summary": "The machine learning loop involves stages of measurement, model creation, and action based on predictions. Feedback from users can refine models, affecting the system's ability to optimize outcomes.",
+    "questions": "[]",
+    "processed_at": "2026-01-20T10:47:34.331832"
+  },
+  {
+    "chunk_id": "9337cf8b-808b-4088-bfa0-8f941d766f6e",
+    "tags": "[\"machine learning\", \"ethics\", \"gender imbalance\"]",
+    "triplets": "[{\"subject\": \"gender imbalance\", \"predicate\": \"causes\", \"object\": \"historical and societal factors\"}, {\"subject\": \"machine learning\", \"predicate\": \"uses\", \"object\": \"data about people\"}, {\"subject\": \"job screening\", \"predicate\": \"part_of\", \"object\": \"machine learning applications\"}, {\"subject\": \"infrastructure improvement\", \"predicate\": \"part_of\", \"object\": \"machine learning applications\"}]",
+    "summary": "The text discusses the ethical considerations of using machine learning in applications involving people, such as job screening and infrastructure improvement. It highlights the historical and societal factors contributing to gender imbalances and the potential for machine learning to perpetuate these disparities.",
+    "questions": "[]",
+    "processed_at": "2026-01-20T10:48:59.246858"
+  },
+  {
+    "chunk_id": "7abf59df-3380-469d-9e79-a74992f2a54f",
+    "tags": "[\"measurement\", \"demographic diversity\", \"race\", \"subjective measurement\", \"historical changes\"]",
+    "triplets": "[{\"subject\": \"measurement\", \"predicate\": \"defined_as\", \"object\": \"a process of quantifying attributes of people\"}, {\"subject\": \"demographic diversity\", \"predicate\": \"is_a\", \"object\": \"a measure of the representation of different racial and ethnic groups in a population\"}, {\"subject\": \"race\", \"predicate\": \"defined_as\", \"object\": \"a social construct that can vary over time and is often subject to biases and changes in perception\"}, {\"subject\": \"multiracial\", \"predicate\": \"is_a\", \"object\": \"a category introduced in 2008 to include individuals with mixed racial backgrounds\"}, {\"subject\": \"recidivism\", \"predicate\": \"is_a\", \"object\": \"a measure of the likelihood of a person reoffending after release from prison\"}, {\"subject\": \"job performance\", \"predicate\": \"is_a\", \"object\": \"a measure of the effectiveness of an employee\"}, {\"subject\": \"academic success\", \"predicate\": \"is_a\", \"object\": \"a measure of the level of academic achievement\"}]",
+    "summary": "The text discusses the challenges and complexities involved in measurement, particularly in the context of demographic diversity and race. It highlights the subjective nature of measurement and the importance of considering societal and historical changes in how race is defined and measured.",
+    "questions": "[]",
+    "processed_at": "2026-01-20T10:50:30.953870"
+  },
+  {
+    "chunk_id": "26e2b131-5905-4035-b211-817e167b2545",
+    "tags": "[\"bias\", \"stereotype\", \"gender\", \"machine learning\", \"translation\"]",
+    "triplets": "[{\"subject\": \"training data\", \"predicate\": \"reflects\", \"object\": \"disparities, distortions, and biases\"}, {\"subject\": \"machine learning\", \"predicate\": \"extracts\", \"object\": \"stereotypes\"}, {\"subject\": \"gender\", \"predicate\": \"influences\", \"object\": \"translation results\"}, {\"subject\": \"machine learning\", \"predicate\": \"optimizes\", \"object\": \"calibration\"}, {\"subject\": \"gender\", \"predicate\": \"influences\", \"object\": \"translation results\"}]",
+    "summary": "The text discusses the biases and distortions in training data, the challenges of building models that reflect real-world data, and the role of machine learning in extracting stereotypes. It also mentions the example of machine translation and the importance of considering gender in data when building models.",
+    "questions": "[]",
+    "processed_at": "2026-01-20T10:52:08.145986"
+  },
+  {
+    "chunk_id": "926d51d0-77d9-45f8-8d69-6390c307a628",
+    "tags": "[\"machine learning\", \"socio-technical system\", \"ethics\", \"drift\", \"causality\"]",
+    "triplets": "[{\"subject\": \"machine learning\", \"predicate\": \"uses\", \"object\": \"ethics\"}, {\"subject\": \"ethics\", \"predicate\": \"defined_as\", \"object\": \"the study of moral principles\"}, {\"subject\": \"drift\", \"predicate\": \"is_a\", \"object\": \"machine learning phenomenon\"}, {\"subject\": \"causality\", \"predicate\": \"defined_as\", \"object\": \"the relationship between cause and effect\"}]",
+    "summary": "The text discusses the pitfalls of machine learning systems, focusing on the importance of understanding the context in which predictions are made and the potential for disparities due to population differences and drift.",
+    "questions": "[]",
+    "processed_at": "2026-01-20T10:53:14.651102"
+  },
+  {
+    "chunk_id": "73a46aa6-b4d9-47fc-aff2-4621040faed5",
+    "tags": "[\"feedback\", \"bias\", \"prediction\"]",
+    "triplets": "[{\"subject\": \"search engine\", \"predicate\": \"uses\", \"object\": \"implicit signals\"}, {\"subject\": \"video sharing website\", \"predicate\": \"uses\", \"object\": \"explicit signal\"}, {\"subject\": \"Latanya Sweeney\", \"predicate\": \"defined_as\", \"object\": \"study\"}, {\"subject\": \"Google\", \"predicate\": \"optimizes\", \"object\": \"advertising system\"}, {\"subject\": \"criminal defendants\", \"predicate\": \"part_of\", \"object\": \"pseudo-experiment\"}]",
+    "summary": "Feedback and feedback loops are crucial in systems like search engines and video sharing websites. However, feedback can be biased due to cultural prejudices and can lead to unintended biases. Self-fulfilling predictions and the impact of actions on outcomes are also significant issues.",
+    "questions": "[]",
+    "processed_at": "2026-01-20T10:54:39.977569"
+  },
+  {
+    "chunk_id": "ef7831c9-7a6c-40cf-bb85-f98df0ce30ef",
+    "tags": "[\"machine-learning\", \"decision-making\", \"fairness\"]",
+    "triplets": "[{\"subject\": \"linear regression\", \"predicate\": \"uses\", \"object\": \"job performance\"}, {\"subject\": \"binary categorization\", \"predicate\": \"part_of\", \"object\": \"hiring classifier\"}, {\"subject\": \"GPA\", \"predicate\": \"defined_as\", \"object\": \"average performance review score\"}, {\"subject\": \"interview score\", \"predicate\": \"defined_as\", \"object\": \"measure of the 'quality' of an applicant\"}, {\"subject\": \"job performance\", \"predicate\": \"optimizes\", \"object\": \"predicting job performance\"}, {\"subject\": \"hiring classifier\", \"predicate\": \"produces\", \"object\": \"job performance prediction\"}, {\"subject\": \"binary categorization\", \"predicate\": \"part_of\", \"object\": \"hiring classifier\"}, {\"subject\": \"GPA\", \"predicate\": \"part_of\", \"object\": \"job performance prediction\"}, {\"subject\": \"interview score\", \"predicate\": \"part_of\", \"object\": \"job performance prediction\"}]",
+    "summary": "The text discusses a simple machine-learning problem involving two variables (GPA and interview score) to predict job performance. It introduces the concept of fairness in decision-making and contrasts it with the idea of an impartial model. The text also mentions the use of linear regression and binary categorization.",
+    "questions": "[]",
+    "processed_at": "2026-01-20T10:56:18.659061"
+  },
+  {
+    "chunk_id": "4edab167-145b-45cb-b44c-8c322016e721",
+    "tags": "[\"decision-making\", \"machine-learning\", \"ethical-issues\"]",
+    "triplets": "[{\"subject\": \"Justice beyond fair decision making\", \"predicate\": \"is_a\", \"object\": \"book\"}, {\"subject\": \"group disparities\", \"predicate\": \"defined_as\", \"object\": \"in decision making\"}, {\"subject\": \"ethical obligations\", \"predicate\": \"defined_as\", \"object\": \"beyond addressing disparities\"}, {\"subject\": \"machine learning\", \"predicate\": \"uses\", \"object\": \"decision-making systems\"}, {\"subject\": \"online search\", \"predicate\": \"defined_as\", \"object\": \"algorithms\"}, {\"subject\": \"recommendation algorithms\", \"predicate\": \"defined_as\", \"object\": \"algorithms\"}]",
+    "summary": "The book discusses the core concerns of group disparities in decision making and ethical obligations beyond just addressing disparities. It also mentions the broader implications of machine learning systems beyond decision-making, such as online search and recommendation algorithms.",
+    "questions": "[]",
+    "processed_at": "2026-01-20T10:57:24.610576"
+  },
+  {
+    "chunk_id": "6eb2c34c-9c91-4685-bd4c-b232b2d2581b",
+    "tags": "[\"machine learning\", \"fairness\", \"workplace dynamics\"]",
+    "triplets": "[{\"subject\": \"machine learning\", \"predicate\": \"uses\", \"object\": \"fair selection process\"}, {\"subject\": \"fair selection process\", \"predicate\": \"defined_as\", \"object\": \"ensuring equal participation of all individuals\"}, {\"subject\": \"workplace dynamics\", \"predicate\": \"part_of\", \"object\": \"workplace\"}, {\"subject\": \"workplace\", \"predicate\": \"optimizes\", \"object\": \"inclusive and productive work environments\"}, {\"subject\": \"disability\", \"predicate\": \"is_a\", \"object\": \"condition\"}, {\"subject\": \"automated decision-making system\", \"predicate\": \"produces\", \"object\": \"unjust and reified conditions\"}, {\"subject\": \"civil rights\", \"predicate\": \"calls\", \"object\": \"regulation of facial recognition technologies\"}]",
+    "summary": "The text discusses the importance of considering the underlying conditions in workplace dynamics when making decisions about fairness in machine learning. It highlights the social model of disability and the need for interventions to create more inclusive and productive work environments.",
+    "questions": "[]",
+    "processed_at": "2026-01-20T10:59:05.036779"
+  },
+  {
+    "chunk_id": "3a3bd4e2-40b7-4674-9483-56ab2d1aa63a",
+    "tags": "[\"stereotyping\", \"identity formation\", \"algorithmic bias\"]",
+    "triplets": "[{\"subject\": \"stereotyping\", \"predicate\": \"is_a\", \"object\": \"harm\"}, {\"subject\": \"identity formation\", \"predicate\": \"is_a\", \"object\": \"harm\"}, {\"subject\": \"algorithmic bias\", \"predicate\": \"defined_as\", \"object\": \"system that reinforces subordination along identity lines\"}]",
+    "summary": "The text discusses the harms of information systems, focusing on how they can perpetuate stereotypes and influence identity formation. It distinguishes between allocative harms (caused by discriminatory systems) and representational harms (caused by systems reinforcing subordination along identity lines). The text also mentions examples of how search and recommendation algorithms can perpetuate gender stereotypes and other harmful practices.",
+    "questions": "[]",
+    "processed_at": "2026-01-20T11:00:21.156413"
+  },
+  {
+    "chunk_id": "51173e3e-513d-42c7-98b2-16d310a9726e",
+    "tags": "[\"fairness\", \"machine learning\", \"measurement\", \"transparency\", \"interpretability\"]",
+    "triplets": "[{\"subject\": \"machine learning\", \"predicate\": \"uses\", \"object\": \"data-driven decision-making\"}, {\"subject\": \"measurement\", \"predicate\": \"defined_as\", \"object\": \"unbiased\"}, {\"subject\": \"transparency\", \"predicate\": \"optimizes\", \"object\": \"data-driven decision-making\"}, {\"subject\": \"interpretability\", \"predicate\": \"is_a\", \"object\": \"machine learning method\"}, {\"subject\": \"fairness\", \"predicate\": \"calls\", \"object\": \"automated decision-making and machine learning\"}]",
+    "summary": "The text discusses the challenges and opportunities in developing fair machine learning systems. It highlights the need for unbiased measurement, the importance of transparency in decision-making, and the potential of machine learning to reconnect with moral foundations of fairness.",
+    "questions": "[]",
+    "processed_at": "2026-01-20T11:02:04.017360"
+  },
+  {
+    "chunk_id": "dc018991-f446-49cd-8434-9b0b5c7ba6c3",
+    "tags": "[\"bias\", \"algorithmic\", \"fairness\", \"demographic\", \"classification\", \"workshop\"]",
+    "triplets": "[{\"subject\": \"Moritz Hardt\", \"predicate\": \"defined_as\", \"object\": \"a blog post\"}, {\"subject\": \"Barocas and Selbst\", \"predicate\": \"defined_as\", \"object\": \"a paper\"}, {\"subject\": \"White House Office of Science and Technology Policy\", \"predicate\": \"defined_as\", \"object\": \"a 2016 report\"}, {\"subject\": \"Friedman and Nissenbaum\", \"predicate\": \"defined_as\", \"object\": \"an early work\"}, {\"subject\": \"FAT/ML workshop\", \"predicate\": \"defined_as\", \"object\": \"a new community\"}, {\"subject\": \"The Black Box Society\", \"predicate\": \"defined_as\", \"object\": \"a popular-audience book\"}, {\"subject\": \"Weapons of Math Destruction\", \"predicate\": \"defined_as\", \"object\": \"a popular-audience book\"}, {\"subject\": \"Automating inequality\", \"predicate\": \"defined_as\", \"object\": \"a popular-audience book\"}, {\"subject\": \"Algorithms of Oppression\", \"predicate\": \"defined_as\", \"object\": \"a popular-audience book\"}]",
+    "summary": "This chapter discusses various biases in machine learning and data-driven decision-making, drawing from several sources including blog posts, papers, and reports. It also mentions early works on fairness in algorithmic systems and demographic disparities in classification. The chapter highlights the establishment of a new community around the topic and popular-audience books on algorithmic systems.",
+    "questions": "[]",
+    "processed_at": "2026-01-20T11:03:25.480186"
+  },
+  {
+    "chunk_id": "10b489a1-36f4-4d05-84eb-b0304a50d8c8",
+    "tags": "[\"legitimacy\", \"automation\", \"fairness\"]",
+    "triplets": "[{\"subject\": \"legitimacy\", \"predicate\": \"is_a\", \"object\": \"concept\"}, {\"subject\": \"automation\", \"predicate\": \"uses\", \"object\": \"decision-making\"}, {\"subject\": \"fairness\", \"predicate\": \"defined_as\", \"object\": \"the fair treatment of different groups\"}]",
+    "summary": "The text discusses the legitimacy of automated decision-making systems, focusing on scenarios where such systems are perceived as unfair or unjust. It explains how institutions need legitimacy to function effectively, and how firms' legitimacy is crucial, especially in the digital technology industry.",
+    "questions": "[]",
+    "processed_at": "2026-01-20T11:04:31.657795"
+  },
+  {
+    "chunk_id": "6d9410cf-ead0-461e-8d2d-f9874bc9fd7f",
+    "tags": "[\"machine learning\", \"human decision-making\", \"bureaucracy\", \"fairness\", \"bias\", \"procedural protections\"]",
+    "triplets": "[{\"subject\": \"machine learning\", \"predicate\": \"uses\", \"object\": \"high-stakes decisions\"}, {\"subject\": \"human decision-making\", \"predicate\": \"defined_as\", \"object\": \"inscrutable and prone to bias\"}, {\"subject\": \"bureaucracy\", \"predicate\": \"part_of\", \"object\": \"high-stakes decisions\"}, {\"subject\": \"fairness\", \"predicate\": \"optimizes\", \"object\": \"procedural protections\"}, {\"subject\": \"bias\", \"predicate\": \"causes\", \"object\": \"machine learning models\"}]",
+    "summary": "The text discusses the role of machine learning in high-stakes decisions, contrasting it with human decision-making. It highlights the importance of understanding the limitations and biases of machine learning models and the need for procedural protections in bureaucracies.",
+    "questions": "[]",
+    "processed_at": "2026-01-20T11:05:44.787730"
+  },
+  {
+    "chunk_id": "a9588d6b-a997-4155-ba0b-0350016139b9",
+    "tags": "[\"arbitrariness\", \"decision-making\", \"procedural consistency\"]",
+    "triplets": "[{\"subject\": \"arbitrariness\", \"predicate\": \"is_a\", \"object\": \"type of decision-making\"}, {\"subject\": \"procedural consistency\", \"predicate\": \"optimizes\", \"object\": \"decision-making processes\"}, {\"subject\": \"basis for decision-making\", \"predicate\": \"defined_as\", \"object\": \"arbitrariness\"}]",
+    "summary": "The text discusses different types of arbitrariness in decision-making processes, focusing on procedural consistency and the basis for decision-making.",
+    "questions": "[]",
+    "processed_at": "2026-01-20T11:06:50.088518"
+  },
+  {
+    "chunk_id": "e89f6def-154d-4717-9200-c1bbf3250590",
+    "tags": "[\"automation\", \"decision-making\", \"machine learning\"]",
+    "triplets": "[{\"subject\": \"Rule-based automation\", \"predicate\": \"is_a\", \"object\": \"decision-making rules\"}, {\"subject\": \"Judgment-based automation\", \"predicate\": \"is_a\", \"object\": \"informal judgment\"}, {\"subject\": \"Data-driven automation\", \"predicate\": \"is_a\", \"object\": \"patterns in data\"}]",
+    "summary": "The text discusses three types of automation: rule-based, judgment-based, and data-driven. Each type has its own unique concerns.",
+    "questions": "[]",
+    "processed_at": "2026-01-20T11:07:52.242835"
+  },
+  {
+    "chunk_id": "1d6704d7-506b-49ce-a149-83ada942af8a",
+    "tags": "[\"automation\", \"decision-making\", \"software\", \"policy-making\"]",
+    "triplets": "[{\"subject\": \"automation\", \"predicate\": \"uses\", \"object\": \"pre-existing decision-making rules\"}, {\"subject\": \"software\", \"predicate\": \"defined_as\", \"object\": \"automated decision-making\"}, {\"subject\": \"policy-making\", \"predicate\": \"part_of\", \"object\": \"decision-making process\"}]",
+    "summary": "The text discusses the challenges and potential pitfalls of automating pre-existing decision-making rules, including errors in coding, insufficient policy definition, and the limitations of software in considering additional details.",
+    "questions": "[]",
+    "processed_at": "2026-01-20T11:08:48.327185"
+  }
+]
