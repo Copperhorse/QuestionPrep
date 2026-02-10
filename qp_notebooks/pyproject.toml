@@ -1,0 +1,30 @@
+[project]
+name = "qp-notebooks"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Your Name", email = "your.email@example.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "marimo>=0.19.7",
+]
+
+[project.scripts]
+qp-notebooks = "qp_notebooks:main"
+
+[build-system]
+requires = ["uv_build>=0.9.28,<0.10.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "altair",
+    "duckdb",
+    "polars[pyarrow]",
+    "python-lsp-ruff>=2.3.0",
+    "python-lsp-server>=1.14.0",
+    "sqlglot",
+    "websockets>=16.0",
+]

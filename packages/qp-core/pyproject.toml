@@ -1,0 +1,17 @@
+[project]
+name = "qp-core"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Muhammad Ahmad Siddiqui", email = "copperhorse409120@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "simhash>=2.1.2",
+    "sqlalchemy>=2.0.46",
+]
+
+[build-system]
+requires = ["uv_build>=0.8.22,<0.9.0"]
+build-backend = "uv_build"

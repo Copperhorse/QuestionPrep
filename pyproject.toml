@@ -1,0 +1,23 @@
+[project]
+name = "questionprep"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "datasets>=4.5.0",
+    "docling>=2.71.0",
+    "faster-whisper>=1.2.1",
+]
+
+[tool.uv.workspace]
+members = [
+    "packages/*",
+    "apps/*",
+    "qp_notebooks",
+]
+
+[tool.uv.sources]
+qp-core = { workspace = true }
+qp-pipeline = { workspace = true }
+qp-voice = { workspace = true }

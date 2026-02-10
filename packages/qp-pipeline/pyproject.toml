@@ -1,0 +1,22 @@
+[project]
+name = "qp-pipeline"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Muhammad Ahmad Siddiqui", email = "copperhorse409120@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "docling>=2.71.0",
+    "langchain-text-splitters>=1.1.0",
+    "onnxruntime>=1.23.2",
+    "openai>=2.16.0",
+    "pymupdf4llm>=0.2.9",
+    "tiktoken>=0.12.0",
+    "torch>=2.10.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.8.22,<0.9.0"]
+build-backend = "uv_build"
