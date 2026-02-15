@@ -29,8 +29,6 @@ cd "$LLAMA_DIR"
     -m "$MODEL_PATH" \
     --host $HOST \
     --port $PORT \
-    --ctx-size 12000 \
-    --n-gpu-layers 100 \
     > "$LOG_FILE" 2>&1 &
 
 SERVER_PID=$!

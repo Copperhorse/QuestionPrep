@@ -19,7 +19,7 @@ def _():
 def _():
     import sqlalchemy
 
-    DATABASE_URL = "sqlite:////home/copper/Desktop/QuestionPrep/QuestionPrep/data/rag_staging.db"
+    DATABASE_URL = "sqlite:////home/copper/Desktop/Project/QuestionPrep/data/rag_staging.db"
     engine = sqlalchemy.create_engine(DATABASE_URL)
     return (engine,)
 
@@ -39,7 +39,12 @@ def _(engine, files, mo):
 def _(chunks, engine, mo):
     _df = mo.sql(
         f"""
-        SELECT * FROM chunks
+        SELECT
+            *
+        FROM
+            chunks
+        LIMIT
+        	3
         """,
         engine=engine
     )
@@ -50,7 +55,10 @@ def _(chunks, engine, mo):
 def _(chunk_enrichments, engine, mo):
     _df = mo.sql(
         f"""
-        SELECT * FROM chunk_enrichments
+        SELECT
+            *
+        FROM
+            chunk_enrichments
         """,
         engine=engine
     )
@@ -69,25 +77,19 @@ def _(chunk_questions, engine, mo):
 
 
 @app.cell
-def _(chunk_enrichments, chunk_questions, chunks, engine, mo):
+def _():
+    return
+
+
+@app.cell
+def _(chunk_questions, chunks, engine, mo):
     _df = mo.sql(
         f"""
-        SELECT 
-            e.processed_at,
-            e.tags,
-            c.file_id,
-            c.content,
-            c.chunk_index,
-            c.section_header,
-            q.question_type,
-            q.difficulty,
-            q.question_text,
-            q.answer_text
-        FROM chunks c
-        JOIN chunk_questions q ON c.chunk_id = q.chunk_id
-        JOIN chunk_enrichments e ON c.chunk_id = e.chunk_id
-        WHERE c.file_id = 'ae65897b-b0d0-47cf-990f-3c693a728b68'
-        ORDER BY e.processed_at DESC;
+        SELECT q.question_id, q.question_text, q.answer_text,c.content,
+               q.difficulty, q.question_type
+        FROM chunk_questions q
+        JOIN chunks c ON q.chunk_id = c.chunk_id
+        WHERE c.should_use = 1
         """,
         engine=engine
     )

@@ -1,9 +1,12 @@
 """
 ingester.py - Fixed with Batch Processing and Aggressive Chunking
+
+this code file is responsible for ingesting pdf using docling_ocr
+converting them into chunks and then evaluating those chunks. And finally uploading them into sqlite database
+Provides an easy entrance.
 """
 
 import logging
-import sqlite3
 import sys
 from pathlib import Path
 

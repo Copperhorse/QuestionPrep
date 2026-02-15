@@ -67,7 +67,6 @@ class DBManager:
                 )
             """)
 
-            # Updated chunks table with hierarchy columns
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS chunks (
                     chunk_id TEXT PRIMARY KEY,
@@ -105,14 +104,16 @@ class DBManager:
                 )
             """)
 
+            # --- UPDATED TABLE DEFINITION ---
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS chunk_questions (
                     question_id TEXT PRIMARY KEY,
                     chunk_id TEXT,
                     question_text TEXT NOT NULL,
                     answer_text TEXT NOT NULL,
+                    source_quote TEXT,  -- New Column for Claim Grounding
                     difficulty TEXT CHECK(difficulty IN ('Easy','Medium','Hard')),
-                    question_type TEXT CHECK(question_type IN ('Fact','Mechanism','Critical')),
+                    question_type TEXT,
                     FOREIGN KEY(chunk_id) REFERENCES chunks(chunk_id)
                 )
             """)
@@ -131,41 +132,37 @@ class DBManager:
                 "CREATE INDEX IF NOT EXISTS idx_questions_chunk ON chunk_questions(chunk_id);"
             )
 
-            # --- MIGRATION CHECK ---
-            # Automatically add new columns if they don't exist in an old DB
+            # --- MIGRATIONS (Auto-update existing DB) ---
+
             try:
                 cur.execute("ALTER TABLE chunks ADD COLUMN parent_section TEXT")
-                self.logger.info("Migrated DB: Added parent_section column")
             except sqlite3.OperationalError:
-                pass  # Column exists
+                pass
 
             try:
                 cur.execute("ALTER TABLE chunks ADD COLUMN top_header TEXT")
-                self.logger.info("Migrated DB: Added top_header column")
             except sqlite3.OperationalError:
-                pass  # Column exists
+                pass
+
+            # Migration for the new source_quote column
+            try:
+                cur.execute("ALTER TABLE chunk_questions ADD COLUMN source_quote TEXT")
+                self.logger.info(
+                    "Migrated DB: Added source_quote column to chunk_questions"
+                )
+            except sqlite3.OperationalError:
+                pass
 
     # =========================================================
-    # FILES & CHUNKS
+    # FILES & CHUNKS (Unchanged)
     # =========================================================
     def save_chunks(self, file_id: str, chunks: List[Dict[str, Any]]) -> bool:
-        """
-        Saves a list of chunks to the database.
-        """
         if not chunks:
-            self.logger.warning(f"No chunks provided for file {file_id}")
             return False
-
         rows = []
         for chunk in chunks:
-            # Handle cases where 'evaluation' might be missing or nested
             eval_data = chunk.get("evaluation", {})
-            should_use = 1 if eval_data.get("should_use", True) else 0
-            quality_score = eval_data.get("quality_score", 0.0)
-
-            # Metadata access safely
             meta = chunk.get("metadata", {})
-
             rows.append(
                 (
                     chunk["chunk_id"],
@@ -174,34 +171,25 @@ class DBManager:
                     chunk["content"],
                     meta.get("content_type", "text"),
                     chunk.get("estimated_tokens", 0),
-                    # Context fields
                     meta.get("section_header", ""),
                     meta.get("parent_section", ""),
                     meta.get("top_header", ""),
-                    # Linkage
                     chunk.get("prev_chunk_id"),
                     chunk.get("next_chunk_id"),
-                    # Quality
-                    quality_score,
-                    should_use,
+                    eval_data.get("quality_score", 0.0),
+                    1 if eval_data.get("should_use", True) else 0,
                 )
             )
-
         try:
             with self._connection() as con:
-                sql = """
-                        INSERT OR REPLACE INTO chunks (
-                            chunk_id, file_id, chunk_index, content,
-                            content_type, estimated_tokens,
-                            section_header, parent_section, top_header,
-                            prev_chunk_id, next_chunk_id,
-                            quality_score, should_use
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """
+                sql = """INSERT OR REPLACE INTO chunks (chunk_id, file_id, chunk_index, content,
+                         content_type, estimated_tokens, section_header, parent_section, top_header,
+                         prev_chunk_id, next_chunk_id, quality_score, should_use)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
                 con.executemany(sql, rows)
             return True
         except Exception as e:
-            self.logger.error(f"Failed to save chunks for {file_id}: {e}")
+            self.logger.error(f"Failed to save chunks: {e}")
             return False
 
     def save_file_metadata(
@@ -219,7 +207,6 @@ class DBManager:
             "processed_at": pd.Timestamp.now().isoformat(),
             "content_length": content_length,
         }
-
         try:
             with self._connection() as con:
                 cols = ", ".join(data.keys())
@@ -238,11 +225,13 @@ class DBManager:
     # =========================================================
 
     def get_pending_files(self, limit: int = 10) -> List[str]:
+        # Logic: Check for chunks that exist but don't have questions yet
+        # We look at chunk_questions instead of enrichment table for stricter check
         sql = """
             SELECT DISTINCT c.file_id
             FROM chunks c
-            LEFT JOIN chunk_enrichments e ON c.chunk_id = e.chunk_id
-            WHERE c.should_use = 1 AND e.chunk_id IS NULL
+            LEFT JOIN chunk_questions q ON c.chunk_id = q.chunk_id
+            WHERE c.should_use = 1 AND q.question_id IS NULL
             LIMIT ?
         """
         with self._connection() as con:
@@ -251,15 +240,7 @@ class DBManager:
 
     def get_chunks_for_file_ordered(self, file_id: str) -> List[Dict[str, Any]]:
         sql = """
-            SELECT
-                c.chunk_id,
-                c.content,
-                c.section_header,
-                c.parent_section,
-                c.top_header,
-                c.chunk_index,
-                e.summary AS existing_summary,
-                e.tags AS existing_tags
+            SELECT c.*, e.summary AS existing_summary, e.tags AS existing_tags
             FROM chunks c
             LEFT JOIN chunk_enrichments e ON c.chunk_id = e.chunk_id
             WHERE c.file_id = ? AND c.should_use = 1
@@ -273,7 +254,6 @@ class DBManager:
             tags = json.dumps(data.get("tags", []))
             triplets = json.dumps(data.get("triplets", []))
         except Exception:
-            self.logger.error(f"Invalid JSON in enrichment for {chunk_id}")
             return
 
         with self._connection() as con:
@@ -293,7 +273,7 @@ class DBManager:
             )
 
     # =========================================================
-    # QUESTIONS
+    # QUESTIONS (UPDATED)
     # =========================================================
 
     def save_questions(self, chunk_id: str, qa_pairs: List[Dict[str, Any]]) -> None:
@@ -302,17 +282,26 @@ class DBManager:
 
         rows = []
         for idx, qa in enumerate(qa_pairs):
-            # Deterministic ID: stable across re-runs
             q_id = f"{chunk_id}_q{idx + 1}"
+
+            # Support both key formats (qa_enricher vs legacy)
+            q_text = qa.get("question_text", qa.get("question", "")).strip()
+            a_text = qa.get("answer_text", qa.get("answer", "")).strip()
+            # Default to "Fact" if not specified, capitalizing for consistency
+            q_type = qa.get("question_type", qa.get("type", "Fact")).capitalize()
+
+            # --- NEW FIELD ---
+            source_quote = qa.get("source_quote", "").strip()
 
             rows.append(
                 (
                     q_id,
                     chunk_id,
-                    qa.get("question", "").strip(),
-                    qa.get("answer", "").strip(),
+                    q_text,
+                    a_text,
+                    source_quote,  # Added to tuple
                     qa.get("difficulty", "Medium"),
-                    qa.get("type", "Fact"),
+                    q_type,
                 )
             )
 
@@ -320,8 +309,8 @@ class DBManager:
             con.executemany(
                 """
                 INSERT OR REPLACE INTO chunk_questions
-                (question_id, chunk_id, question_text, answer_text, difficulty, question_type)
-                VALUES (?, ?, ?, ?, ?, ?)
+                (question_id, chunk_id, question_text, answer_text, source_quote, difficulty, question_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
                 rows,
             )

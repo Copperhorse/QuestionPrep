@@ -2,7 +2,7 @@ import sqlite3
 from pathlib import Path
 
 # Adjust this path to your actual DB location
-DB_PATH = Path("/home/copper/Desktop/QuestionPrep/QuestionPrep/data/rag_staging.db")
+DB_PATH = Path("/home/copper/Desktop/Project/QuestionPrep/data/rag_staging.db")
 
 
 def nuke_enrichment_data():
