@@ -13,7 +13,6 @@ class DBManager:
         self.db_path = db_path
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.setLevel(log_level)
-
         if not self.logger.handlers:
             handler = logging.StreamHandler()
             handler.setFormatter(
@@ -22,12 +21,21 @@ class DBManager:
                 )
             )
             self.logger.addHandler(handler)
-
         self._init_db()
 
     # =========================================================
     # CONNECTION MANAGEMENT
     # =========================================================
+    def get_all_simhashes(self) -> Dict[str, str]:
+        """Retrieve all file simhashes for duplicate detection."""
+        sql = "SELECT simhash, file_id FROM files WHERE simhash IS NOT NULL"
+        try:
+            with self._connection() as con:
+                rows = con.execute(sql).fetchall()
+                return {row["simhash"]: row["file_id"] for row in rows}
+        except Exception as e:
+            self.logger.error(f"Failed to fetch simhashes: {e}")
+            return {}
 
     @contextmanager
     def _connection(self):
@@ -45,13 +53,13 @@ class DBManager:
             con.close()
 
     # =========================================================
-    # SCHEMA
+    # SCHEMA (with new rejection table)
     # =========================================================
-
     def _init_db(self):
         with self._connection() as con:
             cur = con.cursor()
 
+            # Existing tables (unchanged)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS files (
                     file_id TEXT PRIMARY KEY,
@@ -66,7 +74,6 @@ class DBManager:
                     content_length INTEGER
                 )
             """)
-
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS chunks (
                     chunk_id TEXT PRIMARY KEY,
@@ -75,24 +82,16 @@ class DBManager:
                     content TEXT,
                     content_type TEXT,
                     estimated_tokens INTEGER,
-
-                    -- Content Context
                     section_header TEXT,
                     parent_section TEXT,
                     top_header TEXT,
-
-                    -- Linkage
                     prev_chunk_id TEXT,
                     next_chunk_id TEXT,
-
-                    -- Quality & Usage
                     quality_score REAL,
                     should_use INTEGER DEFAULT 1,
-
                     FOREIGN KEY(file_id) REFERENCES files(file_id)
                 )
             """)
-
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS chunk_enrichments (
                     chunk_id TEXT PRIMARY KEY,
@@ -103,17 +102,29 @@ class DBManager:
                     FOREIGN KEY(chunk_id) REFERENCES chunks(chunk_id)
                 )
             """)
-
-            # --- UPDATED TABLE DEFINITION ---
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS chunk_questions (
                     question_id TEXT PRIMARY KEY,
                     chunk_id TEXT,
                     question_text TEXT NOT NULL,
                     answer_text TEXT NOT NULL,
-                    source_quote TEXT,  -- New Column for Claim Grounding
+                    source_quote TEXT,
                     difficulty TEXT CHECK(difficulty IN ('Easy','Medium','Hard')),
                     question_type TEXT,
+                    FOREIGN KEY(chunk_id) REFERENCES chunks(chunk_id)
+                )
+            """)
+
+            # ==================== NEW: REJECTION TABLE ====================
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS chunk_rejections (
+                    rejection_id TEXT PRIMARY KEY,
+                    chunk_id TEXT NOT NULL,
+                    level TEXT,                    -- Easy / Medium / Hard
+                    question_text TEXT,
+                    reason TEXT NOT NULL,          -- "Semantic fail", "Duplicate in Chroma", etc.
+                    semantic_score REAL,
+                    rejected_at TEXT,
                     FOREIGN KEY(chunk_id) REFERENCES chunks(chunk_id)
                 )
             """)
@@ -131,32 +142,77 @@ class DBManager:
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_questions_chunk ON chunk_questions(chunk_id);"
             )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_rejections_chunk ON chunk_rejections(chunk_id);"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_rejections_reason ON chunk_rejections(reason);"
+            )
 
-            # --- MIGRATIONS (Auto-update existing DB) ---
-
+            # Migrations (safe)
             try:
                 cur.execute("ALTER TABLE chunks ADD COLUMN parent_section TEXT")
             except sqlite3.OperationalError:
                 pass
-
             try:
                 cur.execute("ALTER TABLE chunks ADD COLUMN top_header TEXT")
             except sqlite3.OperationalError:
                 pass
-
-            # Migration for the new source_quote column
             try:
                 cur.execute("ALTER TABLE chunk_questions ADD COLUMN source_quote TEXT")
-                self.logger.info(
-                    "Migrated DB: Added source_quote column to chunk_questions"
-                )
+                self.logger.info("Migrated DB: Added source_quote column")
             except sqlite3.OperationalError:
                 pass
 
     # =========================================================
-    # FILES & CHUNKS (Unchanged)
+    # REJECTIONS & DUPLICATES (NEW)
+    # =========================================================
+    def save_rejections(self, chunk_id: str, rejections: List[Dict[str, Any]]) -> None:
+        """
+        Save rejected and duplicated questions.
+        Works for both validator rejections and Chroma duplicates.
+        """
+        if not rejections:
+            return
+
+        rows = []
+        now = pd.Timestamp.now().isoformat()
+
+        for idx, rej in enumerate(rejections):
+            rejection_id = f"{chunk_id}_rej{idx + 1}"
+            rows.append(
+                (
+                    rejection_id,
+                    chunk_id,
+                    rej.get("level"),
+                    rej.get("question", "")[:500],  # truncate for safety
+                    rej.get("reason", "Unknown"),
+                    rej.get("semantic_score"),
+                    now,
+                )
+            )
+
+        try:
+            with self._connection() as con:
+                con.executemany(
+                    """
+                    INSERT OR REPLACE INTO chunk_rejections
+                    (rejection_id, chunk_id, level, question_text, reason, semantic_score, rejected_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    rows,
+                )
+            self.logger.info(
+                f"Saved {len(rejections)} rejections/duplicates for chunk {chunk_id[:8]}"
+            )
+        except Exception as e:
+            self.logger.error(f"Failed to save rejections for {chunk_id}: {e}")
+
+    # =========================================================
+    # EXISTING METHODS (unchanged)
     # =========================================================
     def save_chunks(self, file_id: str, chunks: List[Dict[str, Any]]) -> bool:
+        # ... (your existing code unchanged) ...
         if not chunks:
             return False
         rows = []
@@ -195,6 +251,7 @@ class DBManager:
     def save_file_metadata(
         self, file_id, file_path, simhash, metadata, content_length
     ) -> bool:
+        # ... (your existing code unchanged) ...
         data = {
             "file_id": file_id,
             "file_path": str(file_path),
@@ -220,13 +277,8 @@ class DBManager:
             self.logger.error(f"Metadata save failed: {e}")
             return False
 
-    # =========================================================
-    # ENRICHMENT
-    # =========================================================
-
     def get_pending_files(self, limit: int = 10) -> List[str]:
-        # Logic: Check for chunks that exist but don't have questions yet
-        # We look at chunk_questions instead of enrichment table for stricter check
+        # ... (your existing code unchanged) ...
         sql = """
             SELECT DISTINCT c.file_id
             FROM chunks c
@@ -239,6 +291,7 @@ class DBManager:
         return [r["file_id"] for r in rows]
 
     def get_chunks_for_file_ordered(self, file_id: str) -> List[Dict[str, Any]]:
+        # ... (your existing code unchanged) ...
         sql = """
             SELECT c.*, e.summary AS existing_summary, e.tags AS existing_tags
             FROM chunks c
@@ -250,12 +303,12 @@ class DBManager:
             return [dict(r) for r in con.execute(sql, (file_id,)).fetchall()]
 
     def save_enrichment(self, chunk_id: str, data: Dict[str, Any]) -> None:
+        # ... (your existing code unchanged) ...
         try:
             tags = json.dumps(data.get("tags", []))
             triplets = json.dumps(data.get("triplets", []))
         except Exception:
             return
-
         with self._connection() as con:
             con.execute(
                 """
@@ -272,25 +325,16 @@ class DBManager:
                 ),
             )
 
-    # =========================================================
-    # QUESTIONS (UPDATED)
-    # =========================================================
-
     def save_questions(self, chunk_id: str, qa_pairs: List[Dict[str, Any]]) -> None:
+        # ... (your existing code unchanged) ...
         if not qa_pairs:
             return
-
         rows = []
         for idx, qa in enumerate(qa_pairs):
             q_id = f"{chunk_id}_q{idx + 1}"
-
-            # Support both key formats (qa_enricher vs legacy)
             q_text = qa.get("question_text", qa.get("question", "")).strip()
             a_text = qa.get("answer_text", qa.get("answer", "")).strip()
-            # Default to "Fact" if not specified, capitalizing for consistency
             q_type = qa.get("question_type", qa.get("type", "Fact")).capitalize()
-
-            # --- NEW FIELD ---
             source_quote = qa.get("source_quote", "").strip()
 
             rows.append(
@@ -299,12 +343,11 @@ class DBManager:
                     chunk_id,
                     q_text,
                     a_text,
-                    source_quote,  # Added to tuple
+                    source_quote,
                     qa.get("difficulty", "Medium"),
                     q_type,
                 )
             )
-
         with self._connection() as con:
             con.executemany(
                 """

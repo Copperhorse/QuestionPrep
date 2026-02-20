@@ -13,7 +13,7 @@ def nuke_enrichment_data():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    tables_to_clear = ["chunk_questions", "chunk_enrichments"]
+    tables_to_clear = ["chunk_questions", "chunk_enrichments", "chunk_rejections"]
 
     try:
         print("🧨 Initializing database wipe...")

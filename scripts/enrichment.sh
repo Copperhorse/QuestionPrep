@@ -68,7 +68,7 @@ if [ "$SERVER_READY" = false ]; then
     kill $SERVER_PID
     exit 1
 fi
-
+clear
 # 5. Run Python Enrichment via uv
 # ✅ CHANGED: Runs the module inside the virtual environment
 echo "🐍 Starting Python Enrichment Pipeline..."

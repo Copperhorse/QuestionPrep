@@ -43,8 +43,6 @@ def _(chunks, engine, mo):
             *
         FROM
             chunks
-        LIMIT
-        	3
         """,
         engine=engine
     )
@@ -85,14 +83,29 @@ def _():
 def _(chunk_questions, chunks, engine, mo):
     _df = mo.sql(
         f"""
-        SELECT q.question_id, q.question_text, q.answer_text,c.content,
-               q.difficulty, q.question_type
+        SELECT  q.question_text, q.answer_text,q.source_quote,c.content,c.chunk_id
         FROM chunk_questions q
         JOIN chunks c ON q.chunk_id = c.chunk_id
         WHERE c.should_use = 1
         """,
         engine=engine
     )
+    return
+
+
+@app.cell
+def _(chunk_rejections, engine, mo):
+    _df = mo.sql(
+        f"""
+        SELECT * FROM chunk_rejections
+        """,
+        engine=engine
+    )
+    return
+
+
+@app.cell
+def _():
     return
 
 

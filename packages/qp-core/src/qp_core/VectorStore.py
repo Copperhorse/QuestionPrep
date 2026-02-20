@@ -1,57 +1,57 @@
 """
 qa_vector_store.py
 Chroma-backed Vector Store for Interview Q/A Evaluation
--------------------------------------------------------
-
-Purpose:
-- Store reference Q/A pairs
-- Enable question deduplication
-- Enable semantic scoring vs user answers
 """
 
+import logging
 import uuid
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import chromadb
-from chromadb.config import Settings
+
+# No longer needed for modern PersistentClient
+# from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 
-# ---------------- CONFIG ----------------
+logger = logging.getLogger("QAVectorStore")
 
-CHROMA_DIR = "./chroma_store"
+# ---------------- CONFIG ----------------
+# Default fallback only. The Enricher should pass the real path.
+DEFAULT_CHROMA_DIR = "./chroma_store"
 COLLECTION_NAME = "qa_pairs"
 EMBED_MODEL_NAME = "BAAI/bge-small-en-v1.5"
 
-# ---------------- INIT ----------------
-
-_embedding_model = None
-
-
-def get_embedding_model():
-    global _embedding_model
-    if _embedding_model is None:
-        _embedding_model = SentenceTransformer(EMBED_MODEL_NAME)
-    return _embedding_model
-
-
-def embed(text: str) -> List[float]:
-    model = get_embedding_model()
-    return model.encode(text).tolist()
-
 
 class QAVectorStore:
-    def __init__(self):
-        self.client = chromadb.Client(
-            Settings(
-                persist_directory=CHROMA_DIR,
-                anonymized_telemetry=False,
-            )
+    def __init__(self, chroma_path: str = DEFAULT_CHROMA_DIR, embedding_model=None):
+        """
+        Args:
+            chroma_path: Path to the persistent directory.
+            embedding_model: Optional pre-loaded SentenceTransformer instance.
+                             If None, it loads its own.
+        """
+        logger.info(f"🔌 Connecting to ChromaDB at: {chroma_path}")
+
+        # 1. Use PersistentClient (Modern API)
+        self.client = chromadb.PersistentClient(path=chroma_path)
+
+        # 2. Get/Create Collection with Cosine Similarity
+        # (Default is L2, but Cosine is usually better for text semantic search)
+        self.collection = self.client.get_or_create_collection(
+            name=COLLECTION_NAME, metadata={"hnsw:space": "cosine"}
         )
 
-        self.collection = self.client.get_or_create_collection(
-            name=COLLECTION_NAME, metadata={"purpose": "interview_qa_evaluation"}
-        )
+        # 3. Model Management (Avoid double loading)
+        if embedding_model:
+            self.model = embedding_model
+        else:
+            logger.info(f"Loading embedding model: {EMBED_MODEL_NAME}...")
+            self.model = SentenceTransformer(EMBED_MODEL_NAME)
+
+    def _embed(self, text: str) -> List[float]:
+        # Ensure we return a standard python list, not numpy array
+        return self.model.encode(text).tolist()
 
     # --------------------------------------------------
     # INSERT
@@ -72,70 +72,87 @@ class QAVectorStore:
         question_id = str(uuid.uuid4())
         created_at = datetime.utcnow().isoformat()
 
+        # Chroma metadata must be flat primitives (str, int, float, bool)
+        # Lists (like tags) usually need to be joined as strings or handled carefully.
+        # Newer Chroma versions support lists, but comma-joined strings are safer for compatibility.
+        tags_str = ",".join(tags) if tags else ""
+
         metadata = {
             "chunk_id": chunk_id,
-            "question_id": question_id,
             "difficulty": difficulty,
             "question_type": question_type,
             "source_quote": source_quote,
-            "tags": tags or [],
-            "generation_score": generation_score,
-            "hallucination_score": hallucination_score,
+            "tags": tags_str,
             "created_at": created_at,
+            "type": "question",
         }
 
-        # We store QUESTION embeddings as the primary vector
+        # Add scores only if they exist (None values can cause errors in some DB versions)
+        if generation_score is not None:
+            metadata["generation_score"] = generation_score
+        if hallucination_score is not None:
+            metadata["hallucination_score"] = hallucination_score
+
+        # 1. Store QUESTION (Primary Vector)
         self.collection.add(
             ids=[question_id],
             documents=[question_text],
-            embeddings=[embed(question_text)],
+            embeddings=[self._embed(question_text)],
             metadatas=[metadata],
         )
 
-        # Optional: store answer embedding separately if you want
-        # deterministic scoring later without recomputing
+        # 2. Store ANSWER (Secondary Vector - Optional but useful for reverse lookup)
+        # We modify the metadata to indicate it's an answer
+        answer_meta = metadata.copy()
+        answer_meta["type"] = "reference_answer"
+        answer_meta["linked_question_id"] = question_id
+
         self.collection.add(
             ids=[f"{question_id}::answer"],
             documents=[answer_text],
-            embeddings=[embed(answer_text)],
-            metadatas={
-                **metadata,
-                "role": "reference_answer",
-            },
+            embeddings=[self._embed(answer_text)],
+            metadatas=[answer_meta],
         )
 
     # --------------------------------------------------
-    # QUERY (DEDUP / NAVIGATION)
+    # QUERY
     # --------------------------------------------------
 
     def find_similar_questions(
         self,
         question_text: str,
         top_k: int = 5,
-        min_similarity: float = 0.85,
-    ):
+        min_similarity: float = 0.80,
+    ) -> List[Dict[str, Any]]:
+        query_vec = self._embed(question_text)
+
         results = self.collection.query(
-            query_embeddings=[embed(question_text)],
+            query_embeddings=[query_vec],
             n_results=top_k,
+            # Filter to only match against questions, not answers
+            where={"type": "question"},
         )
 
         filtered = []
-        for doc, meta, dist in zip(
-            results["documents"][0],
-            results["metadatas"][0],
-            results["distances"][0],
-        ):
-            similarity = 1.0 - dist
-            if similarity >= min_similarity:
-                filtered.append(
-                    {
-                        "question": doc,
-                        "metadata": meta,
-                        "similarity": round(similarity, 3),
-                    }
-                )
+        if results["ids"]:
+            for i in range(len(results["ids"][0])):
+                dist = results["distances"][0][i]
+                # If using cosine distance: Similarity = 1 - Distance
+                similarity = 1.0 - dist
+
+                if similarity >= min_similarity:
+                    filtered.append(
+                        {
+                            "id": results["ids"][0][i],
+                            "question": results["documents"][0][i],
+                            "metadata": results["metadatas"][0][i],
+                            "similarity": round(similarity, 3),
+                        }
+                    )
 
         return filtered
 
     def persist(self):
-        self.client.persist()
+        # In modern Chroma (PersistentClient), data is auto-persisted.
+        # This method is kept for API compatibility but does nothing.
+        pass
