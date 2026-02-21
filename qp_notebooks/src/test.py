@@ -6,11 +6,6 @@ app = marimo.App(width="full", auto_download=["ipynb"])
 
 @app.cell
 def _():
-    return
-
-
-@app.cell
-def _():
     import marimo as mo
     return (mo,)
 
@@ -101,6 +96,16 @@ def _(chunk_rejections, engine, mo):
         """,
         engine=engine
     )
+    return
+
+
+@app.cell
+def _():
+    return
+
+
+@app.cell
+def _():
     return
 
 
