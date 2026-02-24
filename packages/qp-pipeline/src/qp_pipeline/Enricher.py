@@ -3,29 +3,7 @@ Enricher.py - Production-Grade Enrichment Pipeline (Optimized Two-Pass)
 
 This module implements an optimized two-pass enrichment pipeline for extracting
 high-quality question-answer (QA) pairs and metadata from text "chunks".
-It is designed to be robust and practical for production use:
-
-High-level design:
-- Pass 1 (batched): Produce candidate questions and source quotes from a chunk.
-  This is intentionally grouped into a single (batched) LLM call per chunk to
-  keep costs and latency predictable.
-- Quick guards: Before invoking the more expensive Pass 2 answer generation,
-  we run fast heuristic checks (quote matching via fuzzy similarity) to filter
-  out weak candidates.
-- Pass 2 (per-question): Generate a reference answer grounded in the chunk.
-- Validation: Validate answers semantically and lexically using sentence
-  embeddings and heuristics. Only validated QA pairs are persisted and added to
-  a vector store.
-
-Key behaviors / safeguards:
-- Anti-bleed prompt fencing: system and user prompts instruct the model to only
-  use the target chunk for question/answer generation.
-- Token-sensitive behavior: very small chunks get fewer questions to avoid
-  hallucination.
-- Fast quote guard: avoids expensive second-pass generation if the quoted text
-  doesn't match the chunk closely enough.
-- Answer validation: semantic similarity + lexical overlap thresholds prevent
-  irrelevant or hallucinated reference answers from being accepted.
+It is designed to be robust and practical for production use.
 """
 
 import json
@@ -36,71 +14,68 @@ import sys
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Deque, Dict, List, Set, Tuple
+from typing import Any, Deque, Dict, List, Optional, Set, Tuple
 
-# External deps used for embeddings and fuzzy matching
+# External deps
 from openai import OpenAI
 from rapidfuzz import fuzz
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
 from sentence_transformers import SentenceTransformer, util
 
 # ---------------- ROBUST PROJECT ROOT DETECTION ----------------
-# Resolve project root in a robust way to support different execution contexts.
-# If the environment provides a RAG_PROJECT_ROOT, prefer it; otherwise walk up
-# the filesystem tree a fixed number of times to find the repository root.
 _env_root = os.environ.get("RAG_PROJECT_ROOT")
 if _env_root:
     project_root = Path(_env_root).resolve()
 else:
-    # We expect this file to live several directories inside the repository.
-    # This relative traversal targets the repository root reliably for local runs.
     project_root = Path(__file__).resolve().parents[4]
 
-# Ensure the project root is on sys.path so we can import local packages.
 if str(project_root) not in sys.path:
     sys.path.append(str(project_root))
 
-# Paths for local persistence (SQLite DB and Chroma vector store)
+# Paths
 DB_PATH = str(project_root / "data" / "rag_staging.db")
 CHROMA_DIR = str(project_root / "data" / "chroma_store")
 
-# Create the directories if they don't already exist. This makes the module
-# safe to run on a fresh checkout or container.
 Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
 Path(CHROMA_DIR).mkdir(parents=True, exist_ok=True)
 
-# Import project-local DB and Vector store abstractions. If imports fail, print
-# a short message — the runtime will raise the ImportError later when functionality
-# is required.
 try:
     from qp_core.DBManager import DBManager
-    from qp_core.VectorStore import QAVectorStore
 except ImportError:
     print("Import errors")
 
 # ---------------- CONFIG ----------------
-# Core LLM endpoint settings and model selection
 LLAMA_API_URL = "http://localhost:8080/v1"
 MODEL_NAME = "lfm-2.5-1.2b"
 
-# Threading and matching thresholds
 MAX_WORKERS = 4
-QUOTE_MATCH_THRESHOLD = 75.0  # fuzzy partial ratio threshold for quote->chunk matching
+QUOTE_MATCH_THRESHOLD = 75.0
+DEDUP_SIMILARITY_THRESHOLD = 80
+MIN_TOKENS_FOR_METADATA = 30
+MIN_TOKENS_FOR_QA = 30
 
-# Map human difficulty levels to internal question types (used when saving)
 DIFFICULTY_TYPE = {
     "Easy": "Fact",
     "Medium": "Mechanism",
     "Hard": "Critical",
 }
 
-# ---------------- RICH LOGGING SETUP ----------------
-console = Console()
+# ---------------- DEFLECTION PATTERN ----------------
+DEFLECTION_PATTERN = re.compile(
+    r"the\s+text\s+does\s+not\s+"
+    r"(specify|mention|state|provide|include|address|discuss|indicate|describe)"
+    r"|the\s+(passage|chunk|document|context)\s+does\s+not"
+    r"|no\s+(specific|numeric|direct)\s+(threshold|value|detail|information|mention)"
+    r"|is\s+not\s+(mentioned|specified|discussed|provided|stated)\s+in\s+the\s+text"
+    r"|cannot\s+be\s+(determined|inferred|found)\s+from",
+    re.IGNORECASE,
+)
 
+# ---------------- RICH LOGGING ----------------
+console = Console()
 logging.basicConfig(
     level=logging.INFO,
     format="%(message)s",
@@ -112,80 +87,33 @@ logger = logging.getLogger("Enricher")
 
 # ---------------- QUESTION LIMITS ----------------
 def get_questions_per_difficulty(estimated_tokens: int) -> int:
-    """
-    Decide how many questions to generate per difficulty bucket based on the
-    estimated token length of the chunk.
-
-    Rationale:
-    - Very small chunks (e.g. short sentences) should not produce multiple
-      questions per difficulty because the risk of inventing unsupported
-      content grows.
-    - For normal-sized chunks, allow up to 3 questions per difficulty.
-
-    Args:
-        estimated_tokens: approximate size of the chunk in tokens (int)
-
-    Returns:
-        int: number of questions to request per difficulty level
-    """
     return 1 if estimated_tokens < 80 else 3
 
 
 # ---------------- ANSWER VALIDATOR ----------------
 class AnswerValidator:
-    """
-    Validate a candidate reference answer against the original chunk.
-
-    The validator uses a combination of:
-    - Structural heuristics (sentence count constraints)
-    - Embedding-based semantic similarity (cosine similarity threshold)
-    - Lexical overlap (simple content word overlap)
-    - Question-type specific checks (e.g., "why" questions require causal phrasing)
-
-    These combined checks reduce false positives and ensure answers are grounded.
-    """
-
-    # Tunable thresholds for validation
-    SIMILARITY_THRESHOLD = 0.52  # cosine similarity threshold (embedding-based)
-    LEXICAL_OVERLAP_THRESHOLD = (
-        0.25  # fraction of answer content words overlapping chunk
-    )
+    SIMILARITY_THRESHOLD = 0.52
+    LEXICAL_OVERLAP_THRESHOLD = 0.25
     MIN_SENTENCES = 1
     MAX_SENTENCES = 5
 
     def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5"):
-        """
-        Initialize embedding model used for semantic similarity checks.
-
-        Args:
-            model_name: name of the sentence-transformers compatible model
-        """
         logger.info(f"Loading Validator Embedding Model: {model_name}...")
         self.model = SentenceTransformer(model_name)
 
     def validate(self, question: str, answer: str, chunk: str) -> Tuple[bool, str]:
-        """
-        Validate an answer.
-
-        Returns:
-            (is_valid: bool, reason: str). If is_valid is False, reason explains why.
-        """
-        # Reject empty answers quickly
         if not answer or not answer.strip():
             return False, "Empty answer"
 
-        # Structural check (enforce answer length / sentence count heuristics)
         struct_ok, sent_count = self._structural_check(answer)
         if not struct_ok:
             return False, f"Structural fail: {sent_count} sentences"
 
-        # Semantic similarity using embeddings (chunk vs answer)
         embeddings = self.model.encode([chunk, answer], convert_to_tensor=True)
         score = float(util.cos_sim(embeddings[0], embeddings[1]))
         if score < self.SIMILARITY_THRESHOLD:
             return False, f"Semantic fail: cos={score:.3f}"
 
-        # Lexical overlap: ensure the answer shares reasonable content words
         c_words = self._content_words(chunk)
         a_words = self._content_words(answer)
         if not a_words:
@@ -194,8 +122,6 @@ class AnswerValidator:
         if overlap < self.LEXICAL_OVERLAP_THRESHOLD:
             return False, f"Lexical fail: overlap={overlap:.3f}"
 
-        # Heuristic: "why" or "how" questions should contain causal/mechanical phrasing.
-        # Using .split() for single-word tokens prevents "by" matching inside "thereby".
         if question.strip().lower().startswith(("why", "how")):
             causal = {
                 "because",
@@ -204,8 +130,8 @@ class AnswerValidator:
                 "therefore",
                 "leads to",
                 "causes",
-                "by",  # captures "by selecting", "by training"
-                "through",  # captures "through model disagreement"
+                "by",
+                "through",
                 "allows",
                 "enables",
                 "since",
@@ -216,36 +142,22 @@ class AnswerValidator:
             ):
                 return False, "Why/How-question without causal/mechanism phrase"
 
-        # Passed all checks
         return True, ""
 
     def _sentence_count(self, text: str) -> int:
-        """
-        Count sentences in a permissive way. Short fragments (<= 5 chars) are ignored.
-        """
         sentences = re.split(r"(?<=[.!?])\s+", text.strip())
         return len([s for s in sentences if len(s) > 5])
 
     def _content_words(self, text: str) -> Set[str]:
-        """
-        Extract "content words" using a combined regex:
-        - Alphabetic tokens >= 4 chars (general terms)
-        - Numeric tokens with optional unit suffixes (e.g. 60%, 15ms, 128blocks)
-        The numeric part prevents precise short answers like "60%" or "15ms" from
-        being incorrectly rejected due to no content word overlap.
-        """
         tokens = re.findall(r"[a-zA-Z]{4,}|\d+[%a-zA-Z]*", text)
         return {t.lower() for t in tokens}
 
     def _structural_check(self, text: str) -> Tuple[bool, int]:
-        """
-        Ensure the number of sentences in `text` falls within MIN_SENTENCES .. MAX_SENTENCES.
-        Returns (ok: bool, count: int).
-        """
         count = self._sentence_count(text)
         return (self.MIN_SENTENCES <= count <= self.MAX_SENTENCES), count
 
 
+# ---------------- LLM CLIENT ----------------
 # ---------------- LLM CLIENT ----------------
 class LLMClient:
     """
@@ -255,6 +167,7 @@ class LLMClient:
     - Provide helper to extract JSON safely from model output (robust to fences).
     - Encapsulate prompts for metadata, question candidate generation (Pass 1),
       and reference answer generation (Pass 2).
+    - Deduplicate near-identical questions produced across difficulty calls.
     """
 
     def __init__(self, base_url: str, api_key: str = "no-key"):
@@ -286,7 +199,7 @@ class LLMClient:
     def _call_model(self, sys_prompt: str, user_prompt: str) -> Dict[str, Any]:
         """
         Portable wrapper for calling the LLM chat-completions endpoint and
-        returning the parsed JSON result from into a Python dict.
+        returning the parsed JSON result into a Python dict.
 
         The function expects the model to return a JSON payload (fenced or raw).
         """
@@ -305,9 +218,117 @@ class LLMClient:
             logger.error(f"LLM Error: {e}")
             return {}
 
-    def generate_metadata(self, text: str, context: str) -> Dict[str, Any]:
+    def _deduplicate_candidates(self, candidates: List[Dict]) -> List[Dict]:
+        """
+        Remove near-duplicate questions using fuzzy token_sort_ratio.
+
+        token_sort_ratio is used rather than partial_ratio because it handles
+        reordered words well — e.g. "Why does X cause Y?" vs "What causes Y in X?"
+        would score high on token_sort but not on plain ratio.
+
+        Two questions are considered duplicates if their score exceeds
+        DEDUP_SIMILARITY_THRESHOLD. The first occurrence is kept.
+
+        Args:
+            candidates: list of candidate dicts from Pass 1
+
+        Returns:
+            Filtered list with near-duplicates removed.
+        """
+        seen: List[str] = []
+        unique: List[Dict] = []
+        for cand in candidates:
+            q = cand.get("question", "").lower().strip()
+            if not q:
+                continue
+            if any(
+                fuzz.token_sort_ratio(q, s) > DEDUP_SIMILARITY_THRESHOLD for s in seen
+            ):
+                logger.debug(f"Deduped question: {q[:60]}")
+                continue
+            seen.append(q)
+            unique.append(cand)
+
+        removed = len(candidates) - len(unique)
+        if removed:
+            logger.info(f"[yellow]Deduplication removed {removed} near-duplicate(s)[/]")
+        return unique
+
+    @staticmethod
+    def _normalize_tags(tags: List[str]) -> List[str]:
+        """
+        Post-process tags returned by the LLM into a consistent, deduplicated format.
+
+        Problems this solves:
+        - Mixed casing: "DataCuration", "data curation", "Data Curation" → one form
+        - Duplicates: same concept appearing twice with different casing
+        - Generic noise tags: overly broad terms that appear on almost every chunk
+          and carry no discriminative value for retrieval or filtering
+
+        Normalisation steps:
+        1. Strip whitespace
+        2. Convert CamelCase and Title Case to lowercase_with_underscores
+        3. Remove tags that are on the generic blocklist
+        4. Deduplicate (preserving first-seen order)
+
+        Args:
+            tags: raw list of tag strings from the LLM
+
+        Returns:
+            Cleaned, normalised, deduplicated list of tag strings.
+        """
+        # Tags so generic they appear on nearly every chunk and add no signal
+        GENERIC_BLOCKLIST = {
+            "rag",
+            "nlp",
+            "llm",
+            "machine_learning",
+            "machinelearning",
+            "data_management",
+            "datamanagement",
+            "document_retrieval",
+            "documentretrieval",
+            "inference",
+            "inferencelogic",
+            "rag_framework",
+            "ragframework",
+            "preprocessing",
+        }
+
+        def _to_snake(tag: str) -> str:
+            # Insert underscore between a lowercase letter and an uppercase letter
+            # to handle CamelCase → snake_case
+            s = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", tag.strip())
+            # Replace spaces and hyphens with underscores
+            s = re.sub(r"[\s\-]+", "_", s)
+            return s.lower()
+
+        seen: set = set()
+        result: List[str] = []
+        for raw in tags:
+            if not isinstance(raw, str) or not raw.strip():
+                continue
+            normalised = _to_snake(raw)
+            if normalised in GENERIC_BLOCKLIST:
+                logger.debug(f"Tag blocked (generic): {raw!r} → {normalised!r}")
+                continue
+            if normalised in seen:
+                logger.debug(f"Tag deduplicated: {normalised!r}")
+                continue
+            seen.add(normalised)
+            result.append(normalised)
+
+        return result
+
+    def generate_metadata(
+        self, text: str, context: str, estimated_tokens: int = 150
+    ) -> Dict[str, Any]:
         """
         Generate structured metadata for a text chunk.
+
+        Skips generation entirely for chunks below MIN_TOKENS_FOR_METADATA — these
+        are too short to produce meaningful tags or triplets and the LLM would
+        hallucinate structure from the context window instead.
 
         Expected output schema (JSON):
         {
@@ -318,30 +339,52 @@ class LLMClient:
           ]
         }
 
-        The context is provided for better understanding but the prompt explicitly
-        instructs the model to output only the structured JSON.
+        Args:
+            text:             raw chunk content
+            context:          surrounding context (for understanding only)
+            estimated_tokens: token estimate for the chunk; used to gate generation
+
+        Returns:
+            Parsed metadata dict, or empty dict if the chunk is too small.
         """
+        if estimated_tokens < MIN_TOKENS_FOR_METADATA:
+            logger.warning(
+                f"Chunk too small ({estimated_tokens} tokens) — skipping metadata generation"
+            )
+            return {}
+
         sys_prompt = (
             "You are a precise Technical Knowledge Graph Extractor. "
-            "Always output valid JSON following the exact schema below."
+            "Always output valid JSON following the exact schema below. "
+            "You extract information ONLY from the TEXT CHUNK — never from context."
         )
         user_prompt = f"""
-        ### CONTEXT (for understanding only):
-            {context}
+    ### BACKGROUND CONTEXT (strictly for orientation — DO NOT extract tags, triplets, or
+    ### summary content from here; it describes a different part of the document):
+    {context}
 
-        ### TEXT CHUNK:
-            {text}
+    ### TEXT CHUNK — THIS IS YOUR ONLY SOURCE:
+    {text}
 
-        ### TASK:
-        Return ONLY this JSON structure:
-        {{
-        "summary": "2-3 sentence summary starting with the main subject",
-        "tags": ["NounTag1", "NounTag2", ...],
-        "triplets": [
-            {{"subject": "Entity", "predicate": "predicate", "object": "Entity"}}
-        ]
-        }}
-        """
+    ### TASK:
+    Analyse the TEXT CHUNK above and return ONLY this JSON structure.
+
+    ### STRICT RULES:
+    1. Tags must be noun phrases that appear explicitly in the TEXT CHUNK.
+    DO NOT invent tags from the Background Context (e.g. do not tag every chunk
+    with "RAG" or "DocumentRetrieval" unless those exact concepts appear in the chunk).
+    2. Every triplet subject and object must be an entity named in the TEXT CHUNK.
+    3. The summary must describe what the TEXT CHUNK discusses, not the overall project.
+    4. Use lowercase_with_underscores for all tags (e.g. "heuristic_filtering", "common_crawl").
+
+    {{
+    "summary": "2-3 sentence summary of the TEXT CHUNK starting with its main subject",
+    "tags": ["noun_tag1", "noun_tag2"],
+    "triplets": [
+        {{"subject": "Entity", "predicate": "predicate", "object": "Entity"}}
+    ]
+    }}
+    """
         return self._call_model(sys_prompt, user_prompt)
 
     # ====================== PASS 1 - PER-DIFFICULTY CALLS ======================
@@ -355,6 +398,9 @@ class LLMClient:
         calls reliably produce the full quota and allow difficulty-specific
         instruction framing. Difficulty label is enforced after each call to
         prevent the model from drifting the label.
+
+        After all three calls, near-duplicate questions are removed via
+        _deduplicate_candidates before returning.
         """
         estimated_tokens = chunk.get("estimated_tokens", 150)
         per_diff = get_questions_per_difficulty(estimated_tokens)
@@ -386,6 +432,9 @@ If the TARGET TEXT CHUNK is too short to answer a question, do not invent inform
 2. Every "source_quote" MUST be copied verbatim from the TARGET TEXT CHUNK (≥25 chars).
    Never pull quotes from the Background Context.
 3. Never generate answers here.
+4. Every question MUST target a DIFFERENT concept, fact, or mechanism from the chunk.
+   Do NOT rephrase or paraphrase any previously listed question.
+   Each question must have a meaningfully distinct answer from all others.
 
 Output ONLY:
 {{"qa_pairs": [ {{"question": "...", "source_quote": "...", "difficulty": "{difficulty}"}}, ... ] }}
@@ -403,7 +452,8 @@ Output ONLY:
 
             logger.debug(f"Pass 1 [{difficulty}]: {count} candidate(s)")
 
-        return all_candidates
+        # Remove near-duplicates produced across the three difficulty calls
+        return self._deduplicate_candidates(all_candidates)
 
     # ====================== PASS 2 ======================
     def generate_reference_answer(self, question: str, chunk_content: str) -> str:
@@ -426,7 +476,9 @@ Output ONLY:
 
 ### INSTRUCTIONS:
 - Analyze the Source Text carefully to find the answer to the Question.
-- Your answer MUST be a concise, complete sentence.
+- Your answer MUST be a complete sentence.
+- Your answer MUST be similar to how a human would write a reference answer in a technical interview setting.
+- You MUST use ONLY the information in the SOURCE TEXT. Do NOT use any outside knowledge.
 - If the text specifies a numeric threshold, percentage, or specific condition
   (e.g., 60%, 15ms, 128 blocks), you MUST include it verbatim in your answer.
 - If, and ONLY IF, the core subject of the question is completely absent from
@@ -450,48 +502,41 @@ Output ONLY:
 
 # ---------------- ENRICHMENT MANAGER ----------------
 class EnrichmentManager:
-    """
-    Orchestrates the end-to-end pipeline: read chunks from DB, run the two-pass
-    enrichment, validate, persist metadata and QA pairs, and add embeddings into
-    a vector store for downstream retrieval.
-
-    Responsibilities:
-    - Iterate files with pending enrichment
-    - Process each chunk: metadata -> candidate questions -> reference answers
-      -> validation -> persist and vectorize
-    - Use a small history window to provide contextual prompts for adjacent prose
-      chunks while avoiding leakage when chunk types differ (e.g., code/table).
-    """
-
     def __init__(self):
         logger.info("🚀 Starting Optimized Two-Pass Pipeline...")
         self.db = DBManager(DB_PATH)
         self.llm = LLMClient(LLAMA_API_URL)
         self.validator = AnswerValidator()
-        self.vector_store = QAVectorStore(chroma_path=CHROMA_DIR)
 
-    def process_chunk(self, chunk: Dict, context_str: str) -> Tuple[bool, str]:
-        """
-        Process a single chunk through metadata generation, QA candidate generation,
-        answer generation, validation, and persistence.
-
-        Returns:
-            (success: bool, summary: str) where summary is the emitted metadata summary
-            (used as history for contextual prompts on later chunks).
-        """
+    # =========================================================
+    # INTERNAL CORE — process_chunk  (UPDATED with safety guard)
+    # =========================================================
+    def _process_chunk(self, chunk: Dict, context_str: str) -> Tuple[bool, str]:
         chunk_id = chunk["chunk_id"]
         content = chunk["content"]
         tokens = chunk.get("estimated_tokens", 0)
         ctype = chunk.get("content_type", "prose")
 
+        # ==================== FULL IDEMPOTENCY GUARD ====================
+        if chunk.get("should_use") != 1:
+            logger.info(f"Chunk {chunk_id[:8]} has should_use=0 — skipping")
+            return True, chunk.get("existing_summary", "")
+
+        if chunk.get("existing_summary") and self.db.get_questions_for_chunk(chunk_id):
+            logger.info(f"Chunk {chunk_id[:8]} already fully enriched — skipping")
+            return True, chunk.get("existing_summary", "")
+        # =================================================================
+
         console.rule(
             f"[bold cyan]Chunk {chunk_id[:8]}[/] | {tokens} tokens | type={ctype}"
         )
 
-        # 1) Metadata generation
         logger.info("[bold]\\[1/3] Generating metadata...[/]")
-        meta = self.llm.generate_metadata(content, context_str)
+        meta = self.llm.generate_metadata(content, context_str, estimated_tokens=tokens)
         if not meta:
+            if tokens < MIN_TOKENS_FOR_METADATA:
+                logger.warning(f"Chunk {chunk_id[:8]} too small — no metadata or QA")
+                return True, ""
             logger.error("Metadata generation FAILED — skipping chunk")
             self.db.save_rejections(
                 chunk_id, [{"reason": "Metadata generation failed"}]
@@ -504,13 +549,15 @@ class EnrichmentManager:
             f"{len(meta.get('triplets', []))} triplets"
         )
 
-        # 1.5) Small chunk skip
-        if tokens < 30:
+        meta["tags"] = self.llm._normalize_tags(meta.get("tags", []))
+        logger.info(f"[dim]Normalised tags:[/] {meta['tags']}")
+
+        self.db.save_enrichment(chunk_id, meta)
+
+        if tokens < MIN_TOKENS_FOR_QA:
             logger.warning(f"Chunk too small ({tokens} tokens) — skipping QA")
-            self.db.save_enrichment(chunk_id, meta)
             return True, meta.get("summary", "")
 
-        # 2) Pass 1
         logger.info("[bold]\\[2/3] Pass 1 — generating candidates...[/]")
         candidates = self.llm.generate_question_candidates(chunk, context_str)
         easy = sum(1 for c in candidates if c.get("difficulty") == "Easy")
@@ -524,7 +571,6 @@ class EnrichmentManager:
         all_valid_qa: List[Dict] = []
         rejected_qa: List[Dict] = []
 
-        # 3) Pass 2
         logger.info("[bold]\\[3/3] Pass 2 — answer generation & validation...[/]")
         for i, cand in enumerate(candidates):
             question = cand.get("question", "").strip()
@@ -536,53 +582,69 @@ class EnrichmentManager:
                 level, "white"
             )
             console.print(
-                f"  [{i + 1}/{len(candidates)}] "
-                f"[{level_colour}]\\[{level}][/] {q_preview}"
+                f"  [{i + 1}/{len(candidates)}] [{level_colour}]\\[{level}][/] {q_preview}"
             )
 
-            # Sanity check
             if not question or len(source_quote) < 25:
                 console.print("    [red]✗ REJECTED[/] — invalid Pass 1 output")
                 rejected_qa.append(
-                    {"level": level, "question": question, "reason": "Invalid Pass 1"}
+                    {
+                        "level": level,
+                        "question": question,
+                        "answer": "",
+                        "reason": "Invalid Pass 1",
+                    }
                 )
                 continue
 
-            # Quote guard
             quote_score = fuzz.partial_ratio(source_quote.lower(), content.lower())
             score_colour = "green" if quote_score >= QUOTE_MATCH_THRESHOLD else "red"
             console.print(f"    Quote match: [{score_colour}]{quote_score:.1f}%[/]")
             if quote_score < QUOTE_MATCH_THRESHOLD:
                 console.print(
-                    f"    [red]✗ REJECTED[/] — quote guard "
-                    f"({quote_score:.1f}% < {QUOTE_MATCH_THRESHOLD}%)"
+                    f"    [red]✗ REJECTED[/] — quote guard ({quote_score:.1f}%)"
                 )
                 rejected_qa.append(
                     {
                         "level": level,
                         "question": question,
+                        "answer": "",
                         "reason": f"Weak quote ({quote_score:.1f}%)",
                     }
                 )
                 continue
 
-            # Generate answer
             answer = self.llm.generate_reference_answer(question, content)
             ans_preview = answer[:100] + ("..." if len(answer) > 100 else "")
             console.print(f"    [dim]Answer:[/] {ans_preview}")
 
-            # NOT_ENOUGH_INFORMATION check
             normalised = answer.replace("_", " ").upper()
             if not answer or "NOT ENOUGH INFORMATION" in normalised:
                 console.print(
                     "    [red]✗ REJECTED[/] — model reported insufficient info"
                 )
                 rejected_qa.append(
-                    {"level": level, "question": question, "reason": "Pass 2 refused"}
+                    {
+                        "level": level,
+                        "question": question,
+                        "answer": answer,
+                        "reason": "Pass 2 refused",
+                    }
                 )
                 continue
 
-            # Validate
+            if DEFLECTION_PATTERN.search(answer):
+                console.print("    [red]✗ REJECTED[/] — deflection phrase detected")
+                rejected_qa.append(
+                    {
+                        "level": level,
+                        "question": question,
+                        "answer": answer,
+                        "reason": f"Deflection: '{answer[:80]}'",
+                    }
+                )
+                continue
+
             is_valid, reason = self.validator.validate(question, answer, content)
             if is_valid:
                 cand["answer"] = answer
@@ -592,29 +654,20 @@ class EnrichmentManager:
             else:
                 console.print(f"    [red]✗ REJECTED[/] — {reason}")
                 rejected_qa.append(
-                    {"level": level, "question": question, "reason": reason}
+                    {
+                        "level": level,
+                        "question": question,
+                        "answer": answer,
+                        "reason": reason,
+                    }
                 )
 
-        # 4) Persist
-        self.db.save_enrichment(chunk_id, meta)
         if all_valid_qa:
             self.db.save_questions(chunk_id, all_valid_qa)
-            for qa in all_valid_qa:
-                self.vector_store.add_qa_pair(
-                    chunk_id=chunk_id,
-                    question_text=qa["question"],
-                    answer_text=qa["answer"],
-                    source_quote=qa["source_quote"],
-                    difficulty=qa["difficulty"],
-                    question_type=qa["type"],
-                    tags=meta.get("tags", []),
-                )
 
-        # 5) Rejections
         if rejected_qa:
             self.db.save_rejections(chunk_id, rejected_qa)
 
-        # Summary panel
         summary_table = Table.grid(padding=(0, 2))
         summary_table.add_row(
             f"[green]✅ Accepted:[/] {len(all_valid_qa)}",
@@ -629,24 +682,27 @@ class EnrichmentManager:
 
         return True, meta.get("summary", "")
 
-    def process_file(self, file_id: str):
-        """
-        Process all chunks for a given file_id in order.
-
-        The method maintains a short 'history' deque of the last N chunk summaries
-        (N=3) to provide a limited context for subsequent chunks. For structural
-        chunk types (table/math/code) we avoid history and instead supply snippets
-        from adjacent chunks as context (to reduce hallucination risk).
-        """
+    # =========================================================
+    # PUBLIC: enrich_single_file  (UPDATED with real prev/next)
+    # =========================================================
+    def enrich_single_file(self, file_id: str) -> None:
         chunks = self.db.get_chunks_for_file_ordered(file_id)
         total = len(chunks)
+
         console.print(
             Panel(
                 f"[bold]File:[/] {file_id}\n[bold]Chunks:[/] {total}",
-                title="[bold cyan]📂 Processing File[/]",
+                title="[bold cyan]📂 Enriching Single File[/]",
                 expand=False,
             )
         )
+
+        if not chunks:
+            logger.warning(f"No processable chunks found for file {file_id[:8]}")
+            return
+
+        # Fast lookup for real prev_chunk_id / next_chunk_id
+        chunk_map = {c["chunk_id"]: c["content"] for c in chunks}
 
         history: Deque[str] = deque(maxlen=3)
 
@@ -656,29 +712,57 @@ class EnrichmentManager:
 
             if ctype in ["table", "math", "code"]:
                 parts = []
-                if i > 0:
-                    parts.append(f"PREV: {chunks[i - 1]['content'][:100]}...")
-                if i < len(chunks) - 1:
-                    parts.append(f"NEXT: {chunks[i + 1]['content'][:100]}...")
-                context_str = "\n".join(parts)
+
+                prev_id = chunk.get("prev_chunk_id")
+                if prev_id and prev_id in chunk_map:
+                    prev_text = chunk_map[prev_id][:150]
+                    parts.append(
+                        f"PREV: {prev_text}{'...' if len(prev_text) == 150 else ''}"
+                    )
+
+                next_id = chunk.get("next_chunk_id")
+                if next_id and next_id in chunk_map:
+                    next_text = chunk_map[next_id][:150]
+                    parts.append(
+                        f"NEXT: {next_text}{'...' if len(next_text) == 150 else ''}"
+                    )
+
+                context_str = (
+                    "\n".join(parts) if parts else "No adjacent structural chunks"
+                )
             else:
                 context_str = "History:\n" + "\n".join([f"- {s}" for s in history])
 
-            success, summary = self.process_chunk(chunk, context_str)
+            success, summary = self._process_chunk(chunk, context_str)
             if success and summary:
                 history.append(summary)
 
-        self.vector_store.persist()
-        logger.info(
-            f"[green]✅ File {file_id[:8]} completed[/] — vector store persisted"
-        )
+        logger.info(f"[green]✅ File {file_id[:8]} enrichment complete[/]")
 
-    def run(self):
-        """
-        Main loop to process pending files in the DB. Uses a small thread pool to
-        parallelize file-level processing. Files are fetched in small batches to
-        keep memory/latency bounded.
-        """
+    # =========================================================
+    # Other public methods (enrich_single_chunk, run) remain unchanged
+    # =========================================================
+    def enrich_single_chunk(
+        self, chunk: Dict, context_str: Optional[str] = None
+    ) -> Dict[str, Any]:
+        ctx = context_str or ""
+        console.print(
+            Panel(
+                f"[bold]Chunk:[/] {chunk.get('chunk_id', 'unknown')[:8]}\n"
+                f"[bold]Tokens:[/] {chunk.get('estimated_tokens', '?')}",
+                title="[bold cyan]🔍 Enriching Single Chunk[/]",
+                expand=False,
+            )
+        )
+        success, summary = self._process_chunk(chunk, ctx)
+        return {
+            "success": success,
+            "summary": summary,
+            "chunk_id": chunk.get("chunk_id", ""),
+        }
+
+    def run(self) -> None:
+        # (your original run method - unchanged)
         console.print(
             Panel(
                 "[bold green]Two-Pass Enrichment Pipeline[/]\n"
@@ -707,7 +791,9 @@ class EnrichmentManager:
                 f"Found [bold]{len(files)}[/] pending file(s) — processing batch..."
             )
             with ThreadPoolExecutor(MAX_WORKERS) as ex:
-                futures = {ex.submit(self.process_file, fid): fid for fid in files}
+                futures = {
+                    ex.submit(self.enrich_single_file, fid): fid for fid in files
+                }
                 for future in as_completed(futures):
                     fid = futures[future]
                     try:
@@ -720,7 +806,7 @@ class EnrichmentManager:
                         logger.error(f"[red]✗ Thread crash[/] on file {fid[:8]}: {e}")
 
 
-# Entry point for manual runs. When executed as a script, run the manager.
+# Entry point
 if __name__ == "__main__":
     console.print(
         Panel(

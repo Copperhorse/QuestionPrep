@@ -14,7 +14,9 @@ def _():
 def _():
     import sqlalchemy
 
-    DATABASE_URL = "sqlite:////home/copper/Desktop/Project/QuestionPrep/data/rag_staging.db"
+    DATABASE_URL = (
+        "sqlite:////home/copper/Desktop/Project/QuestionPrep/data/rag_staging.db"
+    )
     engine = sqlalchemy.create_engine(DATABASE_URL)
     return (engine,)
 
@@ -75,13 +77,22 @@ def _():
 
 
 @app.cell
-def _(chunk_questions, chunks, engine, mo):
+def _(chunk_enrichments, chunk_questions, chunks, engine, mo):
     _df = mo.sql(
         f"""
-        SELECT  q.question_text, q.answer_text,q.source_quote,c.content,c.chunk_id
+        SELECT 
+            q.question_text, 
+            q.answer_text, 
+            q.source_quote,
+            c.content,
+            c.chunk_id
         FROM chunk_questions q
-        JOIN chunks c ON q.chunk_id = c.chunk_id
-        WHERE c.should_use = 1
+        JOIN chunks c 
+            ON q.chunk_id = c.chunk_id
+        JOIN chunk_enrichments e 
+            ON e.chunk_id = c.chunk_id
+        WHERE c.should_use = 1 
+        ORDER by e.processed_at DESC
         """,
         engine=engine
     )

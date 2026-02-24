@@ -84,7 +84,7 @@ def ingest(
         db_manager.save_chunks(file_id=file_id, chunks=evaluated_chunks)
         simhash_handler.add_to_index(file_id, duplicate_check["simhash"])
         print("Chunks saved")
-        return True
+        return True, file_id
     except Exception as e:
         logger.error(f"DB Error for {file_path}: {e}")
         return False
