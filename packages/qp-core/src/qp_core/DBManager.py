@@ -155,6 +155,25 @@ class DBManager:
                     UNIQUE(user_id, file_id)   -- prevent duplicate assignments
                 )
             """)
+            # ---- Session Tracking ----
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS session_results (
+                    session_id TEXT PRIMARY KEY,
+                    user_id TEXT,
+                    start_time TEXT,
+                    end_time TEXT,
+                    questions_attempted INTEGER,
+                    average_score REAL,
+                    final_difficulty TEXT,
+                    history_json TEXT,
+                    FOREIGN KEY(user_id) REFERENCES users(user_id)
+                )
+            """)
+
+            # Add an index to quickly look up a user's past sessions
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_session_results_user ON session_results(user_id);"
+            )
 
             # ---- Indexes ----
             cur.execute(
@@ -254,6 +273,95 @@ class DBManager:
         except Exception as e:
             self.logger.error(f"get_user_by_id failed: {e}")
             return None
+
+    # =========================================================
+    # SESSION RESULTS MANAGEMENT
+    # =========================================================
+    def save_session_result(
+        self,
+        session_id: str,
+        user_id: Optional[str],
+        start_time: str,
+        end_time: str,
+        questions_attempted: int,
+        average_score: float,
+        final_difficulty: str,
+        history_json: str,
+    ) -> bool:
+        """
+        Save the complete results of an interview session.
+        """
+        sql = """
+            INSERT OR REPLACE INTO session_results
+            (session_id, user_id, start_time, end_time, questions_attempted,
+                average_score, final_difficulty, history_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        try:
+            with self._connection() as con:
+                con.execute(
+                    sql,
+                    (
+                        session_id,
+                        user_id,
+                        start_time,
+                        end_time,
+                        questions_attempted,
+                        average_score,
+                        final_difficulty,
+                        history_json,
+                    ),
+                )
+            self.logger.info(f"Saved session result for session: {session_id}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to save session result {session_id}: {e}")
+            return False
+
+    def get_session_result(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve a specific session result by its ID.
+        """
+        sql = "SELECT * FROM session_results WHERE session_id = ?"
+        try:
+            with self._connection() as con:
+                row = con.execute(sql, (session_id,)).fetchone()
+            if row:
+                result = dict(row)
+                # Parse the JSON string back into a Python list/dict
+                result["history"] = (
+                    json.loads(result["history_json"]) if result["history_json"] else []
+                )
+                del result["history_json"]
+                return result
+            return None
+        except Exception as e:
+            self.logger.error(f"Failed to get session result {session_id}: {e}")
+            return None
+
+    def get_session_results_for_user(self, user_id: str) -> List[Dict[str, Any]]:
+        """
+        Retrieve all past interview sessions for a specific user, ordered by most recent.
+        """
+        sql = "SELECT * FROM session_results WHERE user_id = ? ORDER BY end_time DESC"
+        try:
+            with self._connection() as con:
+                rows = con.execute(sql, (user_id,)).fetchall()
+
+            results = []
+            for r in rows:
+                result = dict(r)
+                result["history"] = (
+                    json.loads(result["history_json"]) if result["history_json"] else []
+                )
+                del result["history_json"]
+                results.append(result)
+            return results
+        except Exception as e:
+            self.logger.error(
+                f"Failed to fetch session results for user {user_id}: {e}"
+            )
+            return []
 
     def get_user_by_username(self, username: str) -> Optional[Dict[str, Any]]:
         """

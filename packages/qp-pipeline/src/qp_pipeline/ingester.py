@@ -87,7 +87,7 @@ def ingest(
         return True, file_id
     except Exception as e:
         logger.error(f"DB Error for {file_path}: {e}")
-        return False
+        return False, None
 
 
 def batch_process(db_path=None):
