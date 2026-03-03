@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>My Profile - QuestionPrep</title>
+        <link
+            href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap"
+            rel="stylesheet"
+        />
+        <link rel="stylesheet" href="/static/css/styles.css" />
+    </head>
+    <body>
+        <section style="background-color: var(--lavender); padding: 40px 0">
+            <div class="container text-center">
+                <h1 style="margin-bottom: 0">My Dashboard</h1>
+            </div>
+        </section>
+
+        <section style="padding: 60px 0">
+            <div class="container">
+                <div class="tabs">
+                    <button
+                        class="tab-btn active"
+                        onclick="switchTab('profile')"
+                    >
+                        Profile Info
+                    </button>
+                    <button class="tab-btn" onclick="switchTab('files')">
+                        My Files
+                    </button>
+                </div>
+
+                <div id="profile" class="tab-content active text-center">
+                    <div
+                        class="card"
+                        style="
+                            max-width: 500px;
+                            margin: 0 auto;
+                            background-color: var(--white);
+                            border: 1px solid var(--pink-mist);
+                        "
+                    >
+                        <div
+                            class="icon"
+                            style="background-color: var(--peach-pastel)"
+                        ></div>
+                        <h2 style="margin-bottom: 10px">Student Profile</h2>
+                        <p style="margin-bottom: 30px">Ready to practice?</p>
+                        <button
+                            class="cta-button"
+                            style="
+                                background-color: var(--soft-charcoal);
+                                border: none;
+                                cursor: pointer;
+                            "
+                        >
+                            Edit Profile
+                        </button>
+                    </div>
+                </div>
+
+                <div id="files" class="tab-content">
+                    <div
+                        style="
+                            text-align: right;
+                            margin-bottom: 30px;
+                            display: flex;
+                            justify-content: flex-end;
+                            gap: 10px;
+                            align-items: center;
+                        "
+                    >
+                        <input
+                            type="file"
+                            id="pdf-upload"
+                            accept=".pdf"
+                            style="
+                                padding: 10px;
+                                border: 1px solid var(--lavender);
+                                border-radius: 10px;
+                                font-family: &quot;Inter&quot;, sans-serif;
+                            "
+                        />
+                        <button
+                            id="upload-btn"
+                            class="cta-button"
+                            style="border: none; cursor: pointer"
+                        >
+                            Upload PDF
+                        </button>
+                    </div>
+
+                    <div class="grid" id="files-grid">
+                        <div
+                            class="card"
+                            style="background-color: var(--soft-lime)"
+                        >
+                            <h3>System Design.pdf</h3>
+                            <p>Status: Ready</p>
+                            <div class="actions" style="margin-top: 20px">
+                                <a
+                                    href="/interview"
+                                    class="cta-button"
+                                    style="
+                                        background-color: var(--periwinkle);
+                                        padding: 10px 20px;
+                                        font-size: 0.95rem;
+                                    "
+                                    >Start Interview Session</a
+                                >
+                            </div>
+                        </div>
+
+                        <div
+                            class="card"
+                            style="background-color: var(--pink-mist)"
+                        >
+                            <h3>Data Structures.pdf</h3>
+                            <p>Status: Indexing in background...</p>
+                            <div class="actions" style="margin-top: 20px">
+                                <button
+                                    class="cta-button"
+                                    disabled
+                                    style="
+                                        background-color: #ccc;
+                                        border: none;
+                                        padding: 10px 20px;
+                                        font-size: 0.95rem;
+                                        cursor: not-allowed;
+                                    "
+                                >
+                                    Processing
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <script>
+            function switchTab(tabId) {
+                // Hide all tab contents
+                document
+                    .querySelectorAll(".tab-content")
+                    .forEach((c) => c.classList.remove("active"));
+                // Remove active state from all buttons
+                document
+                    .querySelectorAll(".tab-btn")
+                    .forEach((b) => b.classList.remove("active"));
+
+                // Show the target tab and highlight the clicked button
+                document.getElementById(tabId).classList.add("active");
+                event.currentTarget.classList.add("active");
+            }
+        </script>
+
+        <script src="/static/js/app.js"></script>
+    </body>
+</html>

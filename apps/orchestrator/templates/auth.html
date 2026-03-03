@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Login - QuestionPrep</title>
+        <link
+            href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap"
+            rel="stylesheet"
+        />
+        <link rel="stylesheet" href="/static/css/styles.css" />
+    </head>
+    <body>
+        <section
+            class="hero"
+            style="min-height: 100vh; display: flex; align-items: center"
+        >
+            <div class="container" style="width: 100%">
+                <div class="auth-card">
+                    <div id="login-view">
+                        <h2 style="margin-bottom: 10px">Welcome Back</h2>
+                        <p
+                            style="
+                                margin-bottom: 30px;
+                                color: var(--soft-charcoal);
+                            "
+                        >
+                            Sign in to continue your practice.
+                        </p>
+
+                        <form id="login-form">
+                            <div class="form-group">
+                                <label for="login-username">Username</label>
+                                <input
+                                    type="text"
+                                    id="login-username"
+                                    class="form-control"
+                                    placeholder="Enter your username"
+                                    required
+                                />
+                            </div>
+                            <div class="form-group">
+                                <label for="login-password">Password</label>
+                                <input
+                                    type="password"
+                                    id="login-password"
+                                    class="form-control"
+                                    placeholder="Enter your password"
+                                    required
+                                />
+                            </div>
+                            <button
+                                type="submit"
+                                class="cta-button"
+                                style="
+                                    width: 100%;
+                                    border: none;
+                                    cursor: pointer;
+                                "
+                            >
+                                Log In
+                            </button>
+                        </form>
+
+                        <p style="margin-top: 20px; font-size: 0.9rem">
+                            Don't have an account?
+                            <a
+                                href="javascript:void(0)"
+                                onclick="toggleAuth('signup')"
+                                style="color: var(--sky-blue); font-weight: 600"
+                                >Sign up here</a
+                            >
+                        </p>
+                    </div>
+
+                    <div id="signup-view" style="display: none">
+                        <h2 style="margin-bottom: 10px">Create Account</h2>
+                        <p
+                            style="
+                                margin-bottom: 30px;
+                                color: var(--soft-charcoal);
+                            "
+                        >
+                            Start your stress-free practice today.
+                        </p>
+
+                        <form id="signup-form">
+                            <div class="form-group">
+                                <label for="signup-username">Username</label>
+                                <input
+                                    type="text"
+                                    id="signup-username"
+                                    class="form-control"
+                                    placeholder="Choose a username"
+                                    required
+                                />
+                            </div>
+                            <div class="form-group">
+                                <label for="signup-email">Email</label>
+                                <input
+                                    type="email"
+                                    id="signup-email"
+                                    class="form-control"
+                                    placeholder="Enter your email"
+                                    required
+                                />
+                            </div>
+                            <div class="form-group">
+                                <label for="signup-password">Password</label>
+                                <input
+                                    type="password"
+                                    id="signup-password"
+                                    class="form-control"
+                                    placeholder="Create a password"
+                                    required
+                                />
+                            </div>
+                            <button
+                                type="submit"
+                                class="cta-button"
+                                style="
+                                    width: 100%;
+                                    border: none;
+                                    cursor: pointer;
+                                    background-color: var(--pastel-rose);
+                                "
+                            >
+                                Sign Up
+                            </button>
+                        </form>
+
+                        <p style="margin-top: 20px; font-size: 0.9rem">
+                            Already have an account?
+                            <a
+                                href="javascript:void(0)"
+                                onclick="toggleAuth('login')"
+                                style="color: var(--sky-blue); font-weight: 600"
+                                >Log in here</a
+                            >
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <script>
+            function toggleAuth(view) {
+                if (view === "signup") {
+                    document.getElementById("login-view").style.display =
+                        "none";
+                    document.getElementById("signup-view").style.display =
+                        "block";
+                } else {
+                    document.getElementById("signup-view").style.display =
+                        "none";
+                    document.getElementById("login-view").style.display =
+                        "block";
+                }
+            }
+        </script>
+
+        <script src="/static/js/app.js"></script>
+    </body>
+</html>

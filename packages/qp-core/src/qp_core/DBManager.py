@@ -400,6 +400,46 @@ class DBManager:
             self.logger.error(f"list_users failed: {e}")
             return []
 
+    def delete_user(self, user_id: str) -> bool:
+        """
+        Delete a user and clean up their associated records.
+        Manual deletion is required for child tables because ON DELETE CASCADE
+        was not specified in the original schema creation.
+        """
+        try:
+            with self._connection() as con:
+                # 1. Remove user-file access assignments
+                con.execute("DELETE FROM user_files WHERE user_id = ?", (user_id,))
+
+                # 2. Remove interview session history
+                con.execute("DELETE FROM session_results WHERE user_id = ?", (user_id,))
+
+                # 3. Delete the user record
+                cur = con.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+
+                deleted = cur.rowcount > 0
+                if deleted:
+                    self.logger.info(f"Successfully deleted user {user_id}")
+                return deleted
+        except Exception as e:
+            self.logger.error(f"Failed to delete user {user_id}: {e}")
+            return False
+
+    def update_user_email(self, user_id: str, new_email: str) -> bool:
+        """Update a user's email address."""
+        try:
+            with self._connection() as con:
+                cur = con.execute(
+                    "UPDATE users SET email = ? WHERE user_id = ?", (new_email, user_id)
+                )
+                return cur.rowcount > 0
+        except sqlite3.IntegrityError:
+            self.logger.error(f"Email {new_email} is already in use.")
+            return False
+        except Exception as e:
+            self.logger.error(f"Failed to update user {user_id}: {e}")
+            return False
+
     # =========================================================
     # USER-FILE ASSIGNMENT
     # =========================================================
@@ -434,6 +474,95 @@ class DBManager:
             return True
         except Exception as e:
             self.logger.error(f"assign_file_to_user failed: {e}")
+            return False
+
+    # =========================================================
+    # ADMINISTRATION & MAINTENANCE
+    # =========================================================
+
+    def get_all_files(self) -> List[Dict[str, Any]]:
+        """Retrieve all files in the database for administrative views."""
+        try:
+            with self._connection() as con:
+                rows = con.execute(
+                    "SELECT * FROM files ORDER BY processed_at DESC"
+                ).fetchall()
+            return [dict(r) for r in rows]
+        except Exception as e:
+            self.logger.error(f"get_all_files failed: {e}")
+            return []
+
+    def delete_file(self, file_id: str) -> bool:
+        """
+        Safely delete a file and all its cascaded data (chunks, QA pairs,
+        enrichments, rejections, and user assignments).
+        """
+        try:
+            with self._connection() as con:
+                # 1. Remove user-file assignments
+                con.execute("DELETE FROM user_files WHERE file_id = ?", (file_id,))
+
+                # 2. Find all chunk IDs associated with this file to delete their metadata
+                chunk_rows = con.execute(
+                    "SELECT chunk_id FROM chunks WHERE file_id = ?", (file_id,)
+                ).fetchall()
+                chunk_ids = [row["chunk_id"] for row in chunk_rows]
+
+                if chunk_ids:
+                    # SQLite allows a max of 999 variables in an IN clause by default.
+                    # We chunk the IDs safely in case of massive files.
+                    for i in range(0, len(chunk_ids), 900):
+                        batch = chunk_ids[i : i + 900]
+                        placeholders = ",".join("?" * len(batch))
+
+                        con.execute(
+                            f"DELETE FROM chunk_enrichments WHERE chunk_id IN ({placeholders})",
+                            batch,
+                        )
+                        con.execute(
+                            f"DELETE FROM chunk_questions WHERE chunk_id IN ({placeholders})",
+                            batch,
+                        )
+                        con.execute(
+                            f"DELETE FROM chunk_rejections WHERE chunk_id IN ({placeholders})",
+                            batch,
+                        )
+
+                # 3. Delete the chunks themselves
+                con.execute("DELETE FROM chunks WHERE file_id = ?", (file_id,))
+
+                # 4. Finally, delete the file record
+                cur = con.execute("DELETE FROM files WHERE file_id = ?", (file_id,))
+
+                deleted = cur.rowcount > 0
+                if deleted:
+                    self.logger.info(
+                        f"Successfully deleted file {file_id} and all related data."
+                    )
+                return deleted
+        except Exception as e:
+            self.logger.error(f"Failed to delete file {file_id}: {e}")
+            return False
+
+    def delete_all_files(self) -> bool:
+        """
+        WARNING: Administrative function to wipe all files and related vector data.
+        Clears files, chunks, questions, enrichments, rejections, and assignments.
+        """
+        try:
+            with self._connection() as con:
+                con.execute("DELETE FROM user_files")
+                con.execute("DELETE FROM chunk_enrichments")
+                con.execute("DELETE FROM chunk_questions")
+                con.execute("DELETE FROM chunk_rejections")
+                con.execute("DELETE FROM chunks")
+                con.execute("DELETE FROM files")
+            self.logger.warning(
+                "All files and associated chunk data have been wiped from the database."
+            )
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to delete all files: {e}")
             return False
 
     def remove_file_from_user(self, user_id: str, file_id: str) -> bool:

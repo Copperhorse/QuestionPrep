@@ -8,6 +8,9 @@ dependencies = [
     "datasets>=4.5.0",
     "docling>=2.71.0",
     "faster-whisper>=1.2.1",
+        "qp-core",
+        "qp-pipeline",
+        "qp-voice"
 ]
 
 [tool.uv.workspace]

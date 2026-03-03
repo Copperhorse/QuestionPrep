@@ -74,9 +74,16 @@ def ingest(
 
     # Step 6 & 7: Database Save
     try:
+        # Extract just the file name (equivalent to splitting at the last '/')
+        file_name = file_path.name
+
+        # Strip the UUID prefix that main.py adds (if it exists)
+        if "_" in file_name:
+            file_name = file_name.split("_", 1)[-1]
+
         db_manager.save_file_metadata(
             file_id=file_id,
-            file_path=str(file_path),
+            file_path=file_name,  # <--- Now saving just "DataStructures.pdf"
             simhash=duplicate_check["simhash"],
             metadata=metadata,
             content_length=len(markdown),

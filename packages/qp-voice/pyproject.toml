@@ -10,6 +10,7 @@ requires-python = ">=3.13"
 dependencies = [
     "faster-whisper>=1.2.1",
     "pocket-tts",
+    "qwen-asr>=0.0.6",
     "torch",
 ]
 
