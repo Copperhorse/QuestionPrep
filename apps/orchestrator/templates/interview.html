@@ -8,7 +8,65 @@
             href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap"
             rel="stylesheet"
         />
-        <link rel="stylesheet" href="static/css/styles.css"" />
+        <link rel="stylesheet" href="/static/css/styles.css" />
+
+        <!-- ONNX Runtime — load before stress detector -->
+        <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+
+        <style>
+            #stress-banner {
+                display: none;
+                max-width: 800px;
+                margin: 12px auto 0;
+                padding: 12px 20px;
+                border-radius: 12px;
+                font-size: 14px;
+                font-weight: 600;
+                text-align: center;
+                transition: all 0.3s ease;
+            }
+            #stress-banner.not_stressed {
+                background: #d1fae5;
+                color: #065f46;
+                border: 1px solid #6ee7b7;
+            }
+            #stress-banner.mild {
+                background: #fef9c3;
+                color: #713f12;
+                border: 1px solid #fde047;
+            }
+            #stress-banner.stressed {
+                background: #ffedd5;
+                color: #9a3412;
+                border: 1px solid #fdba74;
+            }
+            #stress-banner.highly_stressed {
+                background: #fee2e2;
+                color: #991b1b;
+                border: 1px solid #fca5a5;
+            }
+            #stress-banner.analyzing {
+                background: #f3f4f6;
+                color: #6b7280;
+                border: 1px solid #d1d5db;
+            }
+
+            #stress-details {
+                display: none;
+                max-width: 800px;
+                margin: 8px auto 0;
+                gap: 8px;
+                flex-wrap: wrap;
+                justify-content: center;
+            }
+            .stress-pill {
+                font-size: 12px;
+                padding: 4px 10px;
+                border-radius: 20px;
+                background: rgba(0, 0, 0, 0.06);
+                color: #374151;
+            }
+        </style>
     </head>
     <body style="background-color: var(--pink-mist)">
         <section style="padding: 40px 0">
@@ -69,6 +127,7 @@
                         </button>
                         <textarea
                             class="form-control"
+                            id="answer-text"
                             rows="2"
                             placeholder="Type your answer or speak..."
                             style="resize: none"
@@ -87,43 +146,70 @@
                     </form>
                 </div>
             </div>
-            <div style="max-width: 800px; margin: 0 auto">
-                <div class="visualizer-wrapper" id="visualizer-container">
-                    <span class="visualizer-prompt" id="mic-prompt"
-                        >Click "Start Mic" to speak</span
-                    >
-                </div>
 
-                <div style="margin-top: 15px">
-                    <audio
-                        id="audio-playback"
-                        controls
-                        style="
-                            display: none;
-                            width: 100%;
-                            border-radius: 20px;
-                            outline: none;
-                        "
-                    ></audio>
-                </div>
+            <!-- Stress indicator — shown after mic stops -->
+            <div id="stress-banner"></div>
+            <div id="stress-details"></div>
+
+            <div style="max-width: 800px; margin: 12px auto 0">
+                <audio
+                    id="audio-playback"
+                    controls
+                    style="
+                        display: none;
+                        width: 100%;
+                        border-radius: 20px;
+                        outline: none;
+                    "
+                ></audio>
             </div>
         </section>
+
+        <!-- Stress detector — loaded as a plain script so window.StressDetector is available -->
+        <script src="/static/js/stress-detector.js"></script>
 
         <script type="module">
             import AudioMotionAnalyzer from "https://unpkg.com/audiomotion-analyzer?module";
 
+            // ── DOM refs ──────────────────────────────────────────────────────
             const container = document.getElementById("visualizer-container");
             const micBtn = document.getElementById("mic-btn");
             const micPrompt = document.getElementById("mic-prompt");
-            const audioPlayback = document.getElementById("audio-playback"); // The new player
+            const audioPlayback = document.getElementById("audio-playback");
+            const stressBanner = document.getElementById("stress-banner");
+            const stressDetails = document.getElementById("stress-details");
+            const answerText = document.getElementById("answer-text");
 
+            // ── State ─────────────────────────────────────────────────────────
             let audioMotion = null;
             let micStream = null;
-
-            // NEW: Variables to hold the recorded audio data
             let mediaRecorder = null;
             let audioChunks = [];
 
+            // ── Stress detector — initialise once, load models in background ──
+            let detector = null;
+
+            if (window.StressDetector) {
+                detector = new window.StressDetector({
+                    xgboost: "/static/models/xgboost.onnx",
+                    randomForest: "/static/models/random_forest.onnx",
+                    logisticRegression:
+                        "/static/models/logistic_regression.onnx",
+                });
+                detector.load().catch((err) => {
+                    console.warn(
+                        "[StressDetector] Model load failed — stress analysis disabled.",
+                        err,
+                    );
+                    detector = null;
+                });
+            } else {
+                console.warn(
+                    "[StressDetector] stress-detector.js not loaded — stress analysis disabled.",
+                );
+            }
+
+            // ── Visualizer ────────────────────────────────────────────────────
             function initVisualizer() {
                 audioMotion = new AudioMotionAnalyzer(container, {
                     source: null,
@@ -141,7 +227,6 @@
                     minDecibels: -70,
                     smoothing: 0.7,
                 });
-
                 audioMotion.registerGradient("pastel", {
                     bgColor: "transparent",
                     colorStops: [
@@ -151,28 +236,120 @@
                     ],
                 });
                 audioMotion.setOptions({ gradient: "pastel" });
-                audioMotion.disconnectOutput(); // Prevents the live feedback screech
+                audioMotion.disconnectOutput();
             }
 
-            // Handle Microphone Access
-            micBtn.addEventListener("click", async () => {
-                if (!audioMotion) {
-                    initVisualizer();
+            // ── Stress UI ─────────────────────────────────────────────────────
+            const STRESS_MESSAGES = {
+                not_stressed: "✅ You sound calm and composed. Great job!",
+                mild: "💛 Slight hesitation detected. Take a breath before answering.",
+                stressed:
+                    "⚠️ You sound stressed. Try slowing down and speaking clearly.",
+                highly_stressed:
+                    "🔴 High stress detected. Pause, breathe, and speak at a steady pace.",
+                analyzing: "⏳ Analysing your response...",
+            };
+
+            function showStressBanner(level, details = null) {
+                stressBanner.className = level;
+                stressBanner.textContent = STRESS_MESSAGES[level] || level;
+                stressBanner.style.display = "block";
+
+                if (details && level !== "analyzing") {
+                    stressDetails.innerHTML = `
+                        <span class="stress-pill">Probability: ${(details.probability * 100).toFixed(0)}%</span>
+                        <span class="stress-pill">XGB: ${(details.modelScores.xgboost * 100).toFixed(0)}%</span>
+                        <span class="stress-pill">RF: ${(details.modelScores.randomForest * 100).toFixed(0)}%</span>
+                        <span class="stress-pill">LR: ${(details.modelScores.logisticRegression * 100).toFixed(0)}%</span>
+                        ${details.stutterFlag ? '<span class="stress-pill">🔁 Disfluency detected</span>' : ""}
+                    `;
+                    stressDetails.style.display = "flex";
+                } else {
+                    stressDetails.style.display = "none";
                 }
+            }
+
+            function hideStressBanner() {
+                stressBanner.style.display = "none";
+                stressDetails.style.display = "none";
+            }
+
+            // ── Decode webm blob → Float32Array at 16kHz ──────────────────────
+            async function blobToFloat32(blob) {
+                const arrayBuffer = await blob.arrayBuffer();
+                const audioCtx = new AudioContext({ sampleRate: 16000 });
+                const decoded = await audioCtx.decodeAudioData(arrayBuffer);
+                await audioCtx.close();
+                return decoded.getChannelData(0);
+            }
+
+            // ── Send to server for STT + disfluency analysis ──────────────────
+            async function analyzeOnServer(blob) {
+                try {
+                    const formData = new FormData();
+                    formData.append("audio", blob, "recording.webm");
+                    const res = await fetch("/api/analyze-speech", {
+                        method: "POST",
+                        body: formData,
+                    });
+                    if (!res.ok) throw new Error(`Server error ${res.status}`);
+                    return await res.json();
+                    // Expected: { transcript, stutter_flag, disfluency_rate }
+                } catch (err) {
+                    console.warn("[Server STT] Failed:", err);
+                    return { stutter_flag: false, transcript: "" };
+                }
+            }
+
+            // ── Main analysis pipeline ────────────────────────────────────────
+            async function runAnalysis(audioBlob) {
+                // If detector didn't load, skip silently
+                if (!detector) return;
+
+                showStressBanner("analyzing");
+
+                try {
+                    // Client-side audio decode + server STT run in parallel
+                    const [float32Audio, serverResult] = await Promise.all([
+                        blobToFloat32(audioBlob),
+                        analyzeOnServer(audioBlob),
+                    ]);
+
+                    // Populate transcript into textarea
+                    if (serverResult.transcript) {
+                        answerText.value = serverResult.transcript;
+                    }
+
+                    // Run ONNX stress detection
+                    const stressResult = await detector.predict(
+                        float32Audio,
+                        serverResult.stutter_flag || false,
+                    );
+
+                    showStressBanner(stressResult.level, {
+                        probability: stressResult.probability,
+                        modelScores: stressResult.modelScores,
+                        stutterFlag: serverResult.stutter_flag,
+                    });
+                } catch (err) {
+                    console.error("[Analysis] Failed:", err);
+                    hideStressBanner();
+                }
+            }
+
+            // ── Mic button ────────────────────────────────────────────────────
+            micBtn.addEventListener("click", async () => {
+                if (!audioMotion) initVisualizer();
 
                 // TOGGLE MIC OFF
                 if (micStream) {
-                    // 1. Stop the recorder
                     if (mediaRecorder && mediaRecorder.state !== "inactive") {
                         mediaRecorder.stop();
                     }
-
-                    // 2. Shut down the mic hardware
                     micStream.getTracks().forEach((track) => track.stop());
                     audioMotion.disconnectInput();
                     micStream = null;
 
-                    // 3. Reset UI
                     micBtn.innerText = "🎙️ Start Mic";
                     micBtn.style.backgroundColor = "var(--soft-lime)";
                     micPrompt.style.display = "block";
@@ -181,51 +358,42 @@
 
                 // TOGGLE MIC ON
                 try {
-                    const audioConstraints = {
+                    micStream = await navigator.mediaDevices.getUserMedia({
                         audio: {
                             noiseSuppression: true,
                             echoCancellation: true,
                             autoGainControl: false,
                         },
                         video: false,
-                    };
+                    });
 
-                    micStream =
-                        await navigator.mediaDevices.getUserMedia(
-                            audioConstraints,
-                        );
-
-                    const audioCtx = audioMotion.audioCtx;
-                    const micNode = audioCtx.createMediaStreamSource(micStream);
+                    const micNode =
+                        audioMotion.audioCtx.createMediaStreamSource(micStream);
                     audioMotion.connectInput(micNode);
 
-                    // --- NEW: SETUP THE RECORDER ---
-                    audioChunks = []; // Clear old recordings
+                    audioChunks = [];
                     mediaRecorder = new MediaRecorder(micStream);
 
-                    // As audio comes in, push it to our array
                     mediaRecorder.ondataavailable = (event) => {
-                        if (event.data.size > 0) {
-                            audioChunks.push(event.data);
-                        }
+                        if (event.data.size > 0) audioChunks.push(event.data);
                     };
 
-                    // When the mic stops, build the audio file and put it in the player
-                    mediaRecorder.onstop = () => {
+                    mediaRecorder.onstop = async () => {
                         const audioBlob = new Blob(audioChunks, {
                             type: "audio/webm",
                         });
-                        const audioUrl = URL.createObjectURL(audioBlob);
 
-                        audioPlayback.src = audioUrl;
-                        audioPlayback.style.display = "block"; // Reveal the player
+                        audioPlayback.src = URL.createObjectURL(audioBlob);
+                        audioPlayback.style.display = "block";
+
+                        // Run stress analysis pipeline
+                        await runAnalysis(audioBlob);
                     };
 
-                    // Start recording!
                     mediaRecorder.start();
-                    audioPlayback.style.display = "none"; // Hide the player while speaking
+                    audioPlayback.style.display = "none";
+                    hideStressBanner();
 
-                    // Update UI
                     micBtn.innerText = "🛑 Stop Mic";
                     micBtn.style.backgroundColor = "var(--pastel-rose)";
                     micPrompt.style.display = "none";

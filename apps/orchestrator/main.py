@@ -27,6 +27,7 @@ from qp_pipeline.Enricher import EnrichmentManager
 from qp_pipeline.game_loop import InterviewSession
 from qp_pipeline.ingester import ingest
 from qp_pipeline.MarkdownChunker import ChunkConfig, MarkdownChunker
+from qp_voice.speech_to_text import SpeechToText, analyze_disfluencies
 
 # ---------------- LOGGING SETUP ----------------
 logging.basicConfig(level=logging.INFO)
@@ -61,6 +62,16 @@ templates = Jinja2Templates(directory=BASE_DIR / "templates")
 # ---------------- STATE & SINGLETONS ----------------
 db = DBManager(db_path=str(DB_PATH))
 active_sessions: Dict[str, InterviewSession] = {}
+_stt = None
+
+
+def get_stt() -> SpeechToText:
+    global _stt
+    if _stt is None:
+        logger.info("Loading Qwen3 ASR model...")
+        _stt = SpeechToText()
+        logger.info("Qwen3 ASR model loaded.")
+    return _stt
 
 
 # ---------------- PYDANTIC MODELS ----------------
@@ -278,6 +289,38 @@ async def get_summary(session_id: str):
 async def end_session(session_id: str):
     if session_id in active_sessions:
         del active_sessions[session_id]
+    return {"message": "Session ended"}
+
+
+@app.post("/api/analyze-speech")
+async def analyze_speech(audio: UploadFile = File(...)):
+    try:
+        audio_bytes = await audio.read()
+        transcript = get_stt().transcribe_opus_bytes(audio_bytes)
+        analysis = analyze_disfluencies(transcript)
+        return {
+            "transcript": transcript,
+            "stutter_flag": analysis["stutter_flag"],
+            "disfluency_rate": analysis["disfluency_rate"],
+            "details": analysis,
+        }
+    except Exception as e:
+        logger.error(f"Speech analysis failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/interview/{session_id}")
+async def end_session(session_id: str):
+    global _stt
+    if session_id in active_sessions:
+        del active_sessions[session_id]
+
+    # Unload ASR model if no active sessions remain
+    if not active_sessions and _stt is not None:
+        del _stt
+        _stt = None
+        logger.info("Qwen3 ASR model unloaded.")
+
     return {"message": "Session ended"}
 
 
