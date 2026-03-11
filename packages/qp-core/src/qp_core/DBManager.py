@@ -440,6 +440,50 @@ class DBManager:
             self.logger.error(f"Failed to update user {user_id}: {e}")
             return False
 
+    def get_questions_for_user(self, user_id: str) -> List[Dict[str, Any]]:
+        """
+        Return all accepted QA pairs for every file assigned to a user.
+        Joins through user_files so only the user's own documents are included.
+
+        Args:
+            user_id: UUID of the user
+
+        Returns:
+            List of QA dicts ordered by file assignment date and chunk index.
+        """
+        sql = """
+                SELECT
+                    q.question_id,
+                    q.chunk_id,
+                    q.question_text,
+                    q.answer_text,
+                    q.source_quote,
+                    q.difficulty,
+                    q.question_type,
+                    e.tags
+                FROM chunk_questions q
+                JOIN chunks c       ON q.chunk_id  = c.chunk_id
+                JOIN user_files uf  ON c.file_id   = uf.file_id
+                LEFT JOIN chunk_enrichments e ON q.chunk_id = e.chunk_id
+                WHERE uf.user_id = ?
+                ORDER BY uf.assigned_at DESC, c.chunk_index
+            """
+        try:
+            with self._connection() as con:
+                rows = con.execute(sql, (user_id,)).fetchall()
+            result = []
+            for r in rows:
+                row = dict(r)
+                try:
+                    row["tags"] = json.loads(row["tags"] or "[]")
+                except (TypeError, json.JSONDecodeError):
+                    row["tags"] = []
+                result.append(row)
+            return result
+        except Exception as e:
+            self.logger.error(f"get_questions_for_user failed: {e}")
+            return []
+
     # =========================================================
     # USER-FILE ASSIGNMENT
     # =========================================================

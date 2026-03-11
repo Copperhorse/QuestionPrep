@@ -115,10 +115,9 @@ class LogicEngine:
         """
         self.db = DBManager(db_path)
         self.user_id = user_id
-        self.grader = self._get_grader()
-
         self.questions: Dict[str, QuestionObj] = {}
         self._load_questions()
+        # grader loads lazily on first analyze_response call
 
     def _load_questions(self):
         """
@@ -179,12 +178,15 @@ class LogicEngine:
     def analyze_response(self, q: QuestionObj, user_text: str) -> TurnResult:
         similarity = 0.5
 
-        if self.grader:
+        grader = self._get_grader()
+        if grader:
             with self._grader_lock:
-                logits = self.grader.predict([(user_text, q.answer)])
+                logits = grader.predict([(user_text, q.answer)])
+            logits = np.array(logits).flatten()  # (1, 3) → (3,)
             probs = np.exp(logits - np.max(logits))
             probs /= probs.sum()
-            similarity = float(probs[1])
+            # nli-deberta-v3-xsmall: 0=contradiction, 1=neutral, 2=entailment
+            similarity = float(probs[2])
 
         similarity = max(0.0, min(1.0, similarity))
         confidence = similarity * q.confidence

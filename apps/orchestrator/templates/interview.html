@@ -10,7 +10,7 @@
         />
         <link rel="stylesheet" href="/static/css/styles.css" />
 
-        <!-- ONNX Runtime — load before stress detector -->
+        <!-- ONNX Runtime — must load before stress-detector.js -->
         <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
 
         <style>
@@ -82,11 +82,14 @@
                     <h2 style="margin: 0; text-align: left">
                         Live Practice Session
                     </h2>
+                    <!-- id added so interview.js can attach the click handler -->
                     <button
+                        id="end-session-btn"
                         class="cta-button"
                         style="
                             background-color: var(--pastel-rose);
                             border: none;
+                            cursor: pointer;
                             padding: 10px 20px;
                         "
                     >
@@ -94,11 +97,18 @@
                     </button>
                 </div>
 
+                <!-- chat-container is populated dynamically by interview.js -->
                 <div class="chat-container">
-                    <div class="message msg-ai">
-                        <strong>Interviewer:</strong><br />
-                        Can you explain the difference between a process and a
-                        thread in an operating system?
+                    <!-- loading state shown before DOMContentLoaded fires -->
+                    <div
+                        style="
+                            text-align: center;
+                            opacity: 0.6;
+                            font-style: italic;
+                            padding: 20px;
+                        "
+                    >
+                        Connecting to session…
                     </div>
                 </div>
 
@@ -111,6 +121,7 @@
                 </div>
 
                 <div style="max-width: 800px; margin: 0 auto">
+                    <!-- interview.js listens to the submit event on this form -->
                     <form class="input-area" id="chat-form">
                         <button
                             type="button"
@@ -129,7 +140,7 @@
                             class="form-control"
                             id="answer-text"
                             rows="2"
-                            placeholder="Type your answer or speak..."
+                            placeholder="Type your answer or speak…"
                             style="resize: none"
                         ></textarea>
                         <button
@@ -165,9 +176,13 @@
             </div>
         </section>
 
-        <!-- Stress detector — loaded as a plain script so window.StressDetector is available -->
+        <!-- Session logic — must load before the module script below -->
+        <script src="/static/js/interview.js"></script>
+
+        <!-- Stress detector (browser global) -->
         <script src="/static/js/stress-detector.js"></script>
 
+        <!-- Mic visualizer + stress analysis pipeline (ES module) -->
         <script type="module">
             import AudioMotionAnalyzer from "https://unpkg.com/audiomotion-analyzer?module";
 
@@ -178,6 +193,7 @@
             const audioPlayback = document.getElementById("audio-playback");
             const stressBanner = document.getElementById("stress-banner");
             const stressDetails = document.getElementById("stress-details");
+            // answerText is shared with interview.js (both reference the same DOM node)
             const answerText = document.getElementById("answer-text");
 
             // ── State ─────────────────────────────────────────────────────────
@@ -186,9 +202,8 @@
             let mediaRecorder = null;
             let audioChunks = [];
 
-            // ── Stress detector — initialise once, load models in background ──
+            // ── Stress detector — load models in background ───────────────────
             let detector = null;
-
             if (window.StressDetector) {
                 detector = new window.StressDetector({
                     xgboost: "/static/models/xgboost.onnx",
@@ -203,10 +218,6 @@
                     );
                     detector = null;
                 });
-            } else {
-                console.warn(
-                    "[StressDetector] stress-detector.js not loaded — stress analysis disabled.",
-                );
             }
 
             // ── Visualizer ────────────────────────────────────────────────────
@@ -247,7 +258,7 @@
                     "⚠️ You sound stressed. Try slowing down and speaking clearly.",
                 highly_stressed:
                     "🔴 High stress detected. Pause, breathe, and speak at a steady pace.",
-                analyzing: "⏳ Analysing your response...",
+                analyzing: "⏳ Analysing your response…",
             };
 
             function showStressBanner(level, details = null) {
@@ -283,7 +294,7 @@
                 return decoded.getChannelData(0);
             }
 
-            // ── Send to server for STT + disfluency analysis ──────────────────
+            // ── Server STT + disfluency ───────────────────────────────────────
             async function analyzeOnServer(blob) {
                 try {
                     const formData = new FormData();
@@ -294,7 +305,6 @@
                     });
                     if (!res.ok) throw new Error(`Server error ${res.status}`);
                     return await res.json();
-                    // Expected: { transcript, stutter_flag, disfluency_rate }
                 } catch (err) {
                     console.warn("[Server STT] Failed:", err);
                     return { stutter_flag: false, transcript: "" };
@@ -303,24 +313,21 @@
 
             // ── Main analysis pipeline ────────────────────────────────────────
             async function runAnalysis(audioBlob) {
-                // If detector didn't load, skip silently
                 if (!detector) return;
 
                 showStressBanner("analyzing");
 
                 try {
-                    // Client-side audio decode + server STT run in parallel
                     const [float32Audio, serverResult] = await Promise.all([
                         blobToFloat32(audioBlob),
                         analyzeOnServer(audioBlob),
                     ]);
 
-                    // Populate transcript into textarea
+                    // Populate transcript into the shared textarea
                     if (serverResult.transcript) {
                         answerText.value = serverResult.transcript;
                     }
 
-                    // Run ONNX stress detection
                     const stressResult = await detector.predict(
                         float32Audio,
                         serverResult.stutter_flag || false,
@@ -341,8 +348,8 @@
             micBtn.addEventListener("click", async () => {
                 if (!audioMotion) initVisualizer();
 
-                // TOGGLE MIC OFF
                 if (micStream) {
+                    // TOGGLE OFF
                     if (mediaRecorder && mediaRecorder.state !== "inactive") {
                         mediaRecorder.stop();
                     }
@@ -356,7 +363,7 @@
                     return;
                 }
 
-                // TOGGLE MIC ON
+                // TOGGLE ON
                 try {
                     micStream = await navigator.mediaDevices.getUserMedia({
                         audio: {
@@ -382,11 +389,8 @@
                         const audioBlob = new Blob(audioChunks, {
                             type: "audio/webm",
                         });
-
                         audioPlayback.src = URL.createObjectURL(audioBlob);
                         audioPlayback.style.display = "block";
-
-                        // Run stress analysis pipeline
                         await runAnalysis(audioBlob);
                     };
 

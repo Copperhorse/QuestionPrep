@@ -32,8 +32,8 @@ if (loginForm) {
       const data = await response.json();
 
       if (response.ok) {
-        // IMPORTANT: Ensure your DB returns 'id'. If it returns 'user_id', change this to data.user.user_id
-        const userId = data.user.id || data.user.user_id;
+        // DBManager returns 'user_id' as the primary key field name
+        const userId = data.user.user_id || data.user.id;
 
         localStorage.setItem("qp_token", data.token);
         localStorage.setItem("qp_user_id", userId);
@@ -95,55 +95,122 @@ if (signupForm) {
 }
 
 // ==========================================
-// 2. DYNAMIC FILE FETCHING (Profile Page)
+// 2. QUESTION GENERATION (Profile Page)
 // ==========================================
+
+/**
+ * Trigger LLM enrichment + vector indexing for a specific file.
+ * Called from the "Generate Questions" button on each file card.
+ * The backend task is async — this just kicks it off.
+ */
+async function generateQuestions(fileId, btn) {
+  const originalText = btn.innerText;
+  btn.innerText = "Starting...";
+  btn.disabled = true;
+
+  try {
+    const response = await fetch(`${API_BASE}/api/questions/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: fileId }),
+    });
+
+    const data = await response.json();
+
+    if (response.ok) {
+      btn.innerText = "✓ Generating in background";
+      btn.style.backgroundColor = "var(--soft-lime)";
+      btn.style.color = "var(--very-soft-navy)";
+      // Leave disabled — re-triggering enrichment is wasteful
+    } else {
+      alert(`Failed to start generation: ${data.detail}`);
+      btn.innerText = originalText;
+      btn.disabled = false;
+    }
+  } catch (error) {
+    console.error("Generate questions failed:", error);
+    alert("A network error occurred during question generation.");
+    btn.innerText = originalText;
+    btn.disabled = false;
+  }
+}
+
+// ==========================================
+// 3. DYNAMIC FILE FETCHING (Profile Page)
+// ==========================================
+
 async function fetchUserFiles() {
   const userId = localStorage.getItem("qp_user_id");
   const filesGrid = document.getElementById("files-grid");
 
   if (!userId || !filesGrid) return;
 
+  // Show a loading state while fetching
+  filesGrid.innerHTML =
+    "<p style='grid-column: 1 / -1; text-align: center; color: var(--soft-charcoal); opacity: 0.6;'>Loading your files…</p>";
+
   try {
     const response = await fetch(`${API_BASE}/api/files?user_id=${userId}`);
     const data = await response.json();
 
-    if (response.ok) {
-      filesGrid.innerHTML = "";
+    filesGrid.innerHTML = "";
 
-      if (!data.files || data.files.length === 0) {
-        filesGrid.innerHTML =
-          "<p style='grid-column: 1 / -1; text-align: center; color: var(--soft-charcoal);'>No PDFs uploaded yet. Start by uploading a document!</p>";
-        return;
-      }
-
-      data.files.forEach((file) => {
-        const fileName = file.filename || file.name || "Document";
-        const fileId = file.id || file.file_id || "unknown";
-
-        const cardHtml = `
-                    <div class="card" style="background-color: var(--soft-lime);">
-                        <h3>${fileName}</h3>
-                        <p>Status: Ready</p>
-                        <div class="actions" style="margin-top: 20px;">
-                            <a href="/interview?file_id=${fileId}" class="cta-button" style="background-color: var(--periwinkle); padding: 10px 20px; font-size: 0.95rem;">Start Interview</a>
-                        </div>
-                    </div>
-                `;
-        filesGrid.innerHTML += cardHtml;
-      });
+    if (!response.ok) {
+      filesGrid.innerHTML =
+        "<p style='grid-column: 1 / -1; color: red;'>Failed to load files.</p>";
+      return;
     }
+
+    if (!data.files || data.files.length === 0) {
+      filesGrid.innerHTML =
+        "<p style='grid-column: 1 / -1; text-align: center; color: var(--soft-charcoal);'>No PDFs uploaded yet. Start by uploading a document above!</p>";
+      return;
+    }
+
+    data.files.forEach((file) => {
+      const fileName =
+        file.filename || file.file_name || file.name || "Document";
+      const fileId = file.file_id || file.id || "unknown";
+
+      const cardHtml = `
+        <div class="card" style="background-color: var(--soft-lime);">
+          <h3 style="word-break: break-word;">${fileName}</h3>
+          <p style="opacity: 0.7; font-size: 0.85rem;">Uploaded: ${
+            file.assigned_at
+              ? new Date(file.assigned_at).toLocaleDateString()
+              : "—"
+          }</p>
+          <div class="actions" style="margin-top: 20px; display: flex; flex-direction: column; gap: 10px;">
+            <button
+              class="cta-button"
+              onclick="generateQuestions('${fileId}', this)"
+              style="background-color: var(--periwinkle); border: none; cursor: pointer; padding: 10px 20px; font-size: 0.9rem;">
+              Generate Questions
+            </button>
+            <a
+              href="/interview"
+              class="cta-button"
+              style="background-color: var(--sky-blue); padding: 10px 20px; font-size: 0.9rem; text-align: center;">
+              Start Interview
+            </a>
+          </div>
+        </div>
+      `;
+      filesGrid.innerHTML += cardHtml;
+    });
   } catch (error) {
     console.error("Error fetching files:", error);
     filesGrid.innerHTML =
-      "<p style='color: red;'>Failed to load your files.</p>";
+      "<p style='grid-column: 1 / -1; color: red;'>Failed to load your files.</p>";
   }
 }
 
 document.addEventListener("DOMContentLoaded", fetchUserFiles);
 
 // ==========================================
-// 3. FILE UPLOAD LOGIC (Profile Page)
+// 4. FILE UPLOAD LOGIC (Profile Page)
 // ==========================================
+
 const uploadBtn = document.getElementById("upload-btn");
 const fileInput = document.getElementById("pdf-upload");
 
@@ -167,7 +234,7 @@ if (uploadBtn && fileInput) {
     formData.append("file", file);
 
     const originalText = uploadBtn.innerText;
-    uploadBtn.innerText = "Uploading & Processing...";
+    uploadBtn.innerText = "Uploading…";
     uploadBtn.disabled = true;
 
     try {
@@ -182,9 +249,13 @@ if (uploadBtn && fileInput) {
       const data = await response.json();
 
       if (response.ok) {
-        alert("File uploaded successfully! It is now processing.");
         fileInput.value = "";
-        await fetchUserFiles();
+        alert(
+          "File uploaded! Ingestion is running in the background.\n\n" +
+            'Once it appears in your file list below, click "Generate Questions" to create interview questions (this may take a few minutes).',
+        );
+        // Poll the file list until the new file appears (up to 90 seconds)
+        pollForNewFile();
       } else {
         alert(`Upload failed: ${data.detail}`);
       }
@@ -196,4 +267,34 @@ if (uploadBtn && fileInput) {
       uploadBtn.disabled = false;
     }
   });
+}
+
+/**
+ * Poll /api/files every 5 seconds after an upload until the file
+ * count increases, then refresh the grid. Stops after 18 attempts (~90s).
+ */
+async function pollForNewFile() {
+  const userId = localStorage.getItem("qp_user_id");
+  if (!userId) return;
+
+  // Capture current file count
+  let previousCount = document.querySelectorAll("#files-grid .card").length;
+  let attempts = 0;
+  const maxAttempts = 18;
+
+  const interval = setInterval(async () => {
+    attempts++;
+    try {
+      const res = await fetch(`${API_BASE}/api/files?user_id=${userId}`);
+      const data = await res.json();
+      const newCount = data.files?.length ?? 0;
+
+      if (newCount > previousCount || attempts >= maxAttempts) {
+        clearInterval(interval);
+        await fetchUserFiles();
+      }
+    } catch (_) {
+      if (attempts >= maxAttempts) clearInterval(interval);
+    }
+  }, 5000);
 }
