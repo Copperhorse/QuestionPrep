@@ -1548,6 +1548,15 @@ wheels = [
 ]
 
 [[package]]
+name = "json-repair"
+version = "0.58.5"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/4b/4d/5b654ef49ed6077f8f8206dae41c2a2de8fef4877483b2c85652ed95fbaf/json_repair-0.58.5.tar.gz", hash = "sha256:2dfdb44573197eeea8eda23f23677412634b2fe2a93bd1dbe4f1b88e4896efa3", size = 44686, upload-time = "2026-03-07T12:57:16.504Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bf/55/390151425cd3095da09d38328481ce9ebd0a4f476882ee74849d5b530cf8/json_repair-0.58.5-py3-none-any.whl", hash = "sha256:16f65addc58d8e0b2b8514e3f6ea9ff568267ce94ead95f4faf90e40dd35d526", size = 43458, upload-time = "2026-03-07T12:57:15.455Z" },
+]
+
+[[package]]
 name = "jsonlines"
 version = "4.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3794,6 +3803,7 @@ source = { editable = "packages/qp-pipeline" }
 dependencies = [
     { name = "chromadb" },
     { name = "docling" },
+    { name = "json-repair" },
     { name = "langchain-text-splitters" },
     { name = "onnxruntime" },
     { name = "openai" },
@@ -3814,6 +3824,7 @@ dependencies = [
 requires-dist = [
     { name = "chromadb", specifier = ">=1.5.0" },
     { name = "docling", specifier = ">=2.71.0" },
+    { name = "json-repair", specifier = ">=0.58.5" },
     { name = "langchain-text-splitters", specifier = ">=1.1.0" },
     { name = "onnxruntime", specifier = ">=1.23.2" },
     { name = "openai", specifier = ">=2.16.0" },
@@ -3858,6 +3869,7 @@ dependencies = [
     { name = "docling" },
     { name = "faster-whisper" },
     { name = "qp-core" },
+    { name = "qp-notebooks" },
     { name = "qp-pipeline" },
     { name = "qp-voice" },
 ]
@@ -3868,6 +3880,7 @@ requires-dist = [
     { name = "docling", specifier = ">=2.71.0" },
     { name = "faster-whisper", specifier = ">=1.2.1" },
     { name = "qp-core", editable = "packages/qp-core" },
+    { name = "qp-notebooks", editable = "qp_notebooks" },
     { name = "qp-pipeline", editable = "packages/qp-pipeline" },
     { name = "qp-voice", editable = "packages/qp-voice" },
 ]
@@ -4841,6 +4854,10 @@ dependencies = [
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ec/23/2c9fe0c9c27f7f6cb865abcea8a4568f29f00acaeadfc6a37f6801f84cb4/torch-2.10.0-2-cp313-none-macosx_11_0_arm64.whl", hash = "sha256:e521c9f030a3774ed770a9c011751fb47c4d12029a3d6522116e48431f2ff89e", size = 79498254, upload-time = "2026-02-10T21:44:44.095Z" },
+    { url = "https://files.pythonhosted.org/packages/ab/c6/4dfe238342ffdcec5aef1c96c457548762d33c40b45a1ab7033bb26d2ff2/torch-2.10.0-3-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:80b1b5bfe38eb0e9f5ff09f206dcac0a87aadd084230d4a36eea5ec5232c115b", size = 915627275, upload-time = "2026-03-11T14:16:11.325Z" },
+    { url = "https://files.pythonhosted.org/packages/d8/f0/72bf18847f58f877a6a8acf60614b14935e2f156d942483af1ffc081aea0/torch-2.10.0-3-cp313-cp313t-manylinux_2_28_x86_64.whl", hash = "sha256:46b3574d93a2a8134b3f5475cfb98e2eb46771794c57015f6ad1fb795ec25e49", size = 915523474, upload-time = "2026-03-11T14:17:44.422Z" },
+    { url = "https://files.pythonhosted.org/packages/f4/39/590742415c3030551944edc2ddc273ea1fdfe8ffb2780992e824f1ebee98/torch-2.10.0-3-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:b1d5e2aba4eb7f8e87fbe04f86442887f9167a35f092afe4c237dfcaaef6e328", size = 915632474, upload-time = "2026-03-11T14:15:13.666Z" },
+    { url = "https://files.pythonhosted.org/packages/b6/8e/34949484f764dde5b222b7fe3fede43e4a6f0da9d7f8c370bb617d629ee2/torch-2.10.0-3-cp314-cp314t-manylinux_2_28_x86_64.whl", hash = "sha256:0228d20b06701c05a8f978357f657817a4a63984b0c90745def81c18aedfa591", size = 915523882, upload-time = "2026-03-11T14:14:46.311Z" },
     { url = "https://files.pythonhosted.org/packages/c9/6f/f2e91e34e3fcba2e3fc8d8f74e7d6c22e74e480bbd1db7bc8900fdf3e95c/torch-2.10.0-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:5c4d217b14741e40776dd7074d9006fd28b8a97ef5654db959d8635b2fe5f29b", size = 146004247, upload-time = "2026-01-21T16:24:29.335Z" },
     { url = "https://files.pythonhosted.org/packages/98/fb/5160261aeb5e1ee12ee95fe599d0541f7c976c3701d607d8fc29e623229f/torch-2.10.0-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:6b71486353fce0f9714ca0c9ef1c850a2ae766b409808acd58e9678a3edb7738", size = 915716445, upload-time = "2026-01-21T16:22:45.353Z" },
     { url = "https://files.pythonhosted.org/packages/6a/16/502fb1b41e6d868e8deb5b0e3ae926bbb36dab8ceb0d1b769b266ad7b0c3/torch-2.10.0-cp313-cp313-win_amd64.whl", hash = "sha256:c2ee399c644dc92ef7bc0d4f7e74b5360c37cdbe7c5ba11318dda49ffac2bc57", size = 113757050, upload-time = "2026-01-21T16:24:19.204Z" },

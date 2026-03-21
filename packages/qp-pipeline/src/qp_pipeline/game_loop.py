@@ -2,6 +2,29 @@
 game_loop.py
 State-Machine Driven Interview Orchestrator (Coaching-Oriented)
 FastAPI Compatible
+
+Changelog vs original:
+- [FIX] Removed CrossEncoder NLI grader entirely.
+    Root cause: nli-deberta-v3-xsmall label order is 0=contradiction, 1=entailment,
+    2=neutral. Original code read probs[2] (neutral) instead of probs[1] (entailment),
+    causing correct answers to score ~2% similarity.
+
+- [NEW] Two-stage grading pipeline in analyze_response():
+    Stage 1 — rapidfuzz partial_ratio (fast, zero model overhead):
+        Normalises score to 0.0–1.0. If score >= LEXICAL_PASS_THRESHOLD (0.75),
+        the answer is a strong lexical match; use this score directly and skip Stage 2.
+        Catches verbatim, near-verbatim, and lightly paraphrased answers cheaply.
+    Stage 2 — BGE-small cosine similarity (semantic fallback):
+        Runs only when Stage 1 score is below threshold, meaning the answer is
+        paraphrased or worded differently but may still be semantically correct.
+        Uses the same BGE model already present in AnswerValidator (Enricher.py)
+        for consistency.
+
+- [CLEAN] Removed numpy import — was only needed for CrossEncoder softmax math.
+- [CLEAN] Removed ML_AVAILABLE flag — BGE is a hard dependency via sentence-transformers,
+    same as AnswerValidator. Kept a try/except for graceful degradation to lexical-only mode.
+- [NEW] TurnResult.grader field records which stage produced the final score
+    ("lexical" or "semantic") for transparency/debugging.
 """
 
 import json
@@ -14,7 +37,7 @@ from enum import Enum, auto
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
-import numpy as np
+from rapidfuzz import fuzz
 
 # ---------------- PATH SETUP ----------------
 current_file = Path(__file__).resolve()
@@ -25,16 +48,25 @@ if str(project_root) not in sys.path:
 from qp_core.DBManager import DBManager
 
 # ---------------- OPTIONAL ML ----------------
+# BGE is used for Stage 2 semantic fallback. If sentence-transformers is not
+# installed, grading degrades gracefully to lexical-only (Stage 1 only).
 try:
-    from sentence_transformers import CrossEncoder
+    from sentence_transformers import SentenceTransformer
+    from sentence_transformers import util as st_util
 
-    ML_AVAILABLE = True
+    BGE_AVAILABLE = True
 except ImportError:
-    ML_AVAILABLE = False
+    BGE_AVAILABLE = False
 
 # ---------------- CONFIG ----------------
 DB_PATH = project_root / "data" / "rag_staging.db"
-GRADER_MODEL = "cross-encoder/nli-deberta-v3-xsmall"
+
+BGE_MODEL = "BAAI/bge-small-en-v1.5"  # Same model used in AnswerValidator
+
+# Stage 1: if rapidfuzz partial_ratio (normalised 0–1) is >= this, accept directly
+# and skip the BGE call entirely. 0.75 = strong lexical overlap.
+LEXICAL_PASS_THRESHOLD = 0.75
+
 SIMILARITY_FLOOR = 0.40
 CONFIDENCE_HINT = 0.65
 
@@ -67,6 +99,7 @@ class TurnResult:
     similarity: float
     confidence: float
     feedback: str
+    grader: str = "lexical"  # "lexical" | "semantic" — which stage scored this turn
 
 
 @dataclass
@@ -85,27 +118,32 @@ class LogicEngine:
     Scoped to a single user — only questions derived from that user's
     ingested files are loaded via get_questions_for_user().
 
-    The CrossEncoder grader is expensive to load (~500MB). It is held as a
-    class-level singleton so it is loaded exactly once regardless of how many
-    sessions are active, and shared safely behind a class-level lock.
+    Grading pipeline (two-stage):
+        1. rapidfuzz partial_ratio — O(n) string comparison, no model needed.
+           If the normalised score clears LEXICAL_PASS_THRESHOLD, used directly.
+        2. BGE cosine similarity — semantic embedding comparison.
+           Runs only when Stage 1 is below threshold.
+
+    The BGE model (~33MB) is held as a class-level singleton so it loads exactly
+    once regardless of how many sessions are active, behind a class-level lock.
     """
 
-    # ---- Shared grader singleton ----
-    _grader = None
-    _grader_lock = threading.Lock()
-    _grader_loaded = False
+    # ---- Shared BGE singleton ----
+    _embedder = None
+    _embedder_lock = threading.Lock()
+    _embedder_loaded = False
 
     @classmethod
-    def _get_grader(cls):
-        """Lazy-load the CrossEncoder exactly once, thread-safely."""
-        if not cls._grader_loaded:
-            with cls._grader_lock:
-                if not cls._grader_loaded:  # double-checked locking
-                    if ML_AVAILABLE:
-                        logger.info(f"Loading grader model: {GRADER_MODEL}")
-                        cls._grader = CrossEncoder(GRADER_MODEL, activation_fn=None)
-                    cls._grader_loaded = True
-        return cls._grader
+    def _get_embedder(cls):
+        """Lazy-load BGE exactly once, thread-safely."""
+        if not cls._embedder_loaded:
+            with cls._embedder_lock:
+                if not cls._embedder_loaded:  # double-checked locking
+                    if BGE_AVAILABLE:
+                        logger.info(f"Loading semantic grader model: {BGE_MODEL}")
+                        cls._embedder = SentenceTransformer(BGE_MODEL)
+                    cls._embedder_loaded = True
+        return cls._embedder
 
     def __init__(self, db_path, user_id: str):
         """
@@ -117,15 +155,14 @@ class LogicEngine:
         self.user_id = user_id
         self.questions: Dict[str, QuestionObj] = {}
         self._load_questions()
-        # grader loads lazily on first analyze_response call
+        # BGE loads lazily on first analyze_response call that needs Stage 2
 
     def _load_questions(self):
         """
         Load questions scoped to the user's assigned files.
 
         Uses DBManager.get_questions_for_user() which joins through user_files,
-        so only documents this user uploaded are included. Tags are already
-        deserialised to a list by DBManager.
+        so only documents this user uploaded are included.
         """
         rows = self.db.get_questions_for_user(self.user_id)
 
@@ -138,7 +175,6 @@ class LogicEngine:
 
         for r in rows:
             tags = r.get("tags", [])
-            # Defensive: DBManager returns a list, but guard against raw JSON string
             if isinstance(tags, str):
                 try:
                     tags = json.loads(tags)
@@ -176,19 +212,62 @@ class LogicEngine:
         return random.choice(candidates) if candidates else None
 
     def analyze_response(self, q: QuestionObj, user_text: str) -> TurnResult:
-        similarity = 0.5
+        """
+        Two-stage grading pipeline.
 
-        grader = self._get_grader()
-        if grader:
-            with self._grader_lock:
-                logits = grader.predict([(user_text, q.answer)])
-            logits = np.array(logits).flatten()  # (1, 3) → (3,)
-            probs = np.exp(logits - np.max(logits))
-            probs /= probs.sum()
-            # nli-deberta-v3-xsmall: 0=contradiction, 1=neutral, 2=entailment
-            similarity = float(probs[2])
+        Stage 1 — Lexical (rapidfuzz partial_ratio):
+            Cheap, runs always. partial_ratio finds the best matching substring
+            window, which handles answers that contain the key phrase among other
+            words without penalising extra context.
+            Score is normalised from 0–100 → 0.0–1.0.
+            If score >= LEXICAL_PASS_THRESHOLD: accept, skip Stage 2.
 
-        similarity = max(0.0, min(1.0, similarity))
+        Stage 2 — Semantic (BGE cosine similarity):
+            Runs only when Stage 1 is below threshold. Encodes both strings with
+            BGE-small and computes cosine similarity. Catches paraphrased-but-correct
+            answers that score low on lexical overlap.
+
+        Why not CrossEncoder NLI (original approach):
+            - Wrong tool: NLI entailment is asymmetric and does not map cleanly to
+              answer quality. A paraphrase can have high cosine similarity but low
+              entailment probability.
+            - Was also bugged: code read probs[2] (neutral) instead of probs[1]
+              (entailment) for nli-deberta-v3-xsmall, causing all scores to be ~2%.
+        """
+        grader_used = "lexical"
+
+        # ---- Stage 1: rapidfuzz partial_ratio ----
+        lexical_score = (
+            fuzz.partial_ratio(user_text.lower(), q.answer.lower()) / 100.0
+        )  # normalise to 0.0–1.0
+
+        if lexical_score >= LEXICAL_PASS_THRESHOLD:
+            # Strong lexical match — no need to invoke the embedding model
+            similarity = lexical_score
+            logger.debug(f"[Stage 1 pass] q={q.id[:8]} lexical={lexical_score:.3f}")
+        else:
+            # ---- Stage 2: BGE semantic similarity ----
+            embedder = self._get_embedder()
+            if embedder:
+                with self._embedder_lock:
+                    embeddings = embedder.encode(
+                        [user_text, q.answer], convert_to_tensor=True
+                    )
+                semantic_score = float(st_util.cos_sim(embeddings[0], embeddings[1]))
+                # Cosine similarity can be slightly negative for very dissimilar
+                # texts; clamp to 0 so downstream logic stays in [0, 1].
+                similarity = max(0.0, min(1.0, semantic_score))
+                grader_used = "semantic"
+                logger.debug(
+                    f"[Stage 2] q={q.id[:8]} lexical={lexical_score:.3f} "
+                    f"semantic={similarity:.3f}"
+                )
+            else:
+                # BGE unavailable — fall back to lexical score only
+                similarity = lexical_score
+                grader_used = "lexical"
+                logger.warning("BGE unavailable — using lexical score only")
+
         confidence = similarity * q.confidence
 
         if similarity < SIMILARITY_FLOOR:
@@ -207,6 +286,7 @@ class LogicEngine:
             similarity=similarity,
             confidence=confidence,
             feedback=feedback,
+            grader=grader_used,
         )
 
 
@@ -216,8 +296,8 @@ class InterviewSession:
     Manages state for a single user's interview session.
 
     Each session owns its own LogicEngine so question scoping is per-user.
-    The grader model inside LogicEngine is a shared singleton, so creating
-    many sessions in parallel does not reload the model each time.
+    The BGE model inside LogicEngine is a shared singleton, so creating many
+    sessions in parallel does not reload the model each time.
     """
 
     def __init__(self, session_id: str, user_id: str, db_path=None):
@@ -279,6 +359,7 @@ class InterviewSession:
                 "similarity": result.similarity,
                 "confidence": result.confidence,
                 "feedback": result.feedback,
+                "grader": result.grader,  # "lexical" | "semantic"
             },
             "next_question": (
                 self.ctx.current_question.text if self.ctx.current_question else None

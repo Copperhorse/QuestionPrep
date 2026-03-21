@@ -3,145 +3,280 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Login - QuestionPrep</title>
+        <title>Sign In — QuestionPrep</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link
-            href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap"
+            href="https://fonts.googleapis.com/css2?family=Cormorant:ital,wght@0,300;0,400;1,300;1,400&family=Inter:wght@400;500;600&family=Lora:ital,wght@0,400;0,500;1,400;1,500&display=swap"
             rel="stylesheet"
         />
         <link rel="stylesheet" href="/static/css/styles.css" />
     </head>
-    <body>
-        <section
-            class="hero"
-            style="min-height: 100vh; display: flex; align-items: center"
-        >
-            <div class="container" style="width: 100%">
-                <div class="auth-card">
-                    <div id="login-view">
-                        <h2 style="margin-bottom: 10px">Welcome Back</h2>
-                        <p
-                            style="
-                                margin-bottom: 30px;
-                                color: var(--soft-charcoal);
-                            "
-                        >
-                            Sign in to continue your practice.
-                        </p>
+    <body
+        style="
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            padding: 3rem 1.5rem;
+        "
+    >
+        <!-- Back link -->
+        <div style="max-width: 420px; margin: 0 auto 1.5rem; width: 100%">
+            <a href="/" class="btn btn-ghost btn-sm" style="padding-left: 0">
+                <i data-lucide="arrow-left"></i> Back to home
+            </a>
+        </div>
 
-                        <form id="login-form">
-                            <div class="form-group">
-                                <label for="login-username">Username</label>
-                                <input
-                                    type="text"
-                                    id="login-username"
-                                    class="form-control"
-                                    placeholder="Enter your username"
-                                    required
-                                />
-                            </div>
-                            <div class="form-group">
-                                <label for="login-password">Password</label>
-                                <input
-                                    type="password"
-                                    id="login-password"
-                                    class="form-control"
-                                    placeholder="Enter your password"
-                                    required
-                                />
-                            </div>
-                            <button
-                                type="submit"
-                                class="cta-button"
-                                style="
-                                    width: 100%;
-                                    border: none;
-                                    cursor: pointer;
-                                "
-                            >
-                                Log In
-                            </button>
-                        </form>
-
-                        <p style="margin-top: 20px; font-size: 0.9rem">
-                            Don't have an account?
-                            <a
-                                href="javascript:void(0)"
-                                onclick="toggleAuth('signup')"
-                                style="color: var(--sky-blue); font-weight: 600"
-                                >Sign up here</a
-                            >
-                        </p>
-                    </div>
-
-                    <div id="signup-view" style="display: none">
-                        <h2 style="margin-bottom: 10px">Create Account</h2>
-                        <p
-                            style="
-                                margin-bottom: 30px;
-                                color: var(--soft-charcoal);
-                            "
-                        >
-                            Start your stress-free practice today.
-                        </p>
-
-                        <form id="signup-form">
-                            <div class="form-group">
-                                <label for="signup-username">Username</label>
-                                <input
-                                    type="text"
-                                    id="signup-username"
-                                    class="form-control"
-                                    placeholder="Choose a username"
-                                    required
-                                />
-                            </div>
-                            <div class="form-group">
-                                <label for="signup-email">Email</label>
-                                <input
-                                    type="email"
-                                    id="signup-email"
-                                    class="form-control"
-                                    placeholder="Enter your email"
-                                    required
-                                />
-                            </div>
-                            <div class="form-group">
-                                <label for="signup-password">Password</label>
-                                <input
-                                    type="password"
-                                    id="signup-password"
-                                    class="form-control"
-                                    placeholder="Create a password"
-                                    required
-                                />
-                            </div>
-                            <button
-                                type="submit"
-                                class="cta-button"
-                                style="
-                                    width: 100%;
-                                    border: none;
-                                    cursor: pointer;
-                                    background-color: var(--pastel-rose);
-                                "
-                            >
-                                Sign Up
-                            </button>
-                        </form>
-
-                        <p style="margin-top: 20px; font-size: 0.9rem">
-                            Already have an account?
-                            <a
-                                href="javascript:void(0)"
-                                onclick="toggleAuth('login')"
-                                style="color: var(--sky-blue); font-weight: 600"
-                                >Log in here</a
-                            >
-                        </p>
-                    </div>
+        <!-- Auth card -->
+        <div class="auth-card">
+            <!-- Brand -->
+            <div style="text-align: center; margin-bottom: 2rem">
+                <div
+                    style="
+                        font-family: &quot;Cormorant&quot;, Georgia, serif;
+                        font-size: 1.7rem;
+                        font-weight: 300;
+                        color: var(--ink);
+                    "
+                >
+                    QuestionPrep
                 </div>
             </div>
-        </section>
+
+            <!-- ── LOGIN VIEW ── -->
+            <div id="login-view">
+                <h2
+                    style="
+                        font-size: 1.35rem;
+                        margin-bottom: 0.4rem;
+                        text-align: center;
+                    "
+                >
+                    Welcome back
+                </h2>
+                <p
+                    class="page-subtitle"
+                    style="text-align: center; margin: 0 auto 2rem"
+                >
+                    Sign in to continue your practice.
+                </p>
+
+                <form id="login-form">
+                    <div class="form-group">
+                        <label for="login-username">
+                            <span
+                                style="
+                                    display: flex;
+                                    align-items: center;
+                                    gap: 0.35rem;
+                                "
+                            >
+                                <i
+                                    data-lucide="user"
+                                    style="width: 13px; height: 13px"
+                                ></i>
+                                Username
+                            </span>
+                        </label>
+                        <input
+                            type="text"
+                            id="login-username"
+                            class="form-control"
+                            placeholder="Your username"
+                            required
+                        />
+                    </div>
+
+                    <div class="form-group">
+                        <label for="login-password">
+                            <span
+                                style="
+                                    display: flex;
+                                    align-items: center;
+                                    gap: 0.35rem;
+                                "
+                            >
+                                <i
+                                    data-lucide="lock"
+                                    style="width: 13px; height: 13px"
+                                ></i>
+                                Password
+                            </span>
+                        </label>
+                        <input
+                            type="password"
+                            id="login-password"
+                            class="form-control"
+                            placeholder="Your password"
+                            required
+                        />
+                    </div>
+
+                    <button
+                        type="submit"
+                        class="btn btn-primary"
+                        style="
+                            width: 100%;
+                            justify-content: center;
+                            margin-top: 0.5rem;
+                        "
+                    >
+                        <i data-lucide="log-in"></i> Log In
+                    </button>
+                </form>
+
+                <p
+                    style="
+                        margin-top: 1.5rem;
+                        font-size: 0.88rem;
+                        text-align: center;
+                        color: var(--ink-very-light);
+                    "
+                >
+                    Don't have an account?
+                    <a
+                        href="javascript:void(0)"
+                        onclick="toggleAuth('signup')"
+                        style="
+                            color: var(--warm);
+                            font-weight: 600;
+                            text-decoration: none;
+                        "
+                        >Sign up here</a
+                    >
+                </p>
+            </div>
+
+            <!-- ── SIGNUP VIEW ── -->
+            <div id="signup-view" style="display: none">
+                <h2
+                    style="
+                        font-size: 1.35rem;
+                        margin-bottom: 0.4rem;
+                        text-align: center;
+                    "
+                >
+                    Create an account
+                </h2>
+                <p
+                    class="page-subtitle"
+                    style="text-align: center; margin: 0 auto 2rem"
+                >
+                    Start your stress-free practice today.
+                </p>
+
+                <form id="signup-form">
+                    <div class="form-group">
+                        <label for="signup-username">
+                            <span
+                                style="
+                                    display: flex;
+                                    align-items: center;
+                                    gap: 0.35rem;
+                                "
+                            >
+                                <i
+                                    data-lucide="user"
+                                    style="width: 13px; height: 13px"
+                                ></i>
+                                Username
+                            </span>
+                        </label>
+                        <input
+                            type="text"
+                            id="signup-username"
+                            class="form-control"
+                            placeholder="Choose a username"
+                            required
+                        />
+                    </div>
+
+                    <div class="form-group">
+                        <label for="signup-email">
+                            <span
+                                style="
+                                    display: flex;
+                                    align-items: center;
+                                    gap: 0.35rem;
+                                "
+                            >
+                                <i
+                                    data-lucide="mail"
+                                    style="width: 13px; height: 13px"
+                                ></i>
+                                Email
+                            </span>
+                        </label>
+                        <input
+                            type="email"
+                            id="signup-email"
+                            class="form-control"
+                            placeholder="Your email address"
+                            required
+                        />
+                    </div>
+
+                    <div class="form-group">
+                        <label for="signup-password">
+                            <span
+                                style="
+                                    display: flex;
+                                    align-items: center;
+                                    gap: 0.35rem;
+                                "
+                            >
+                                <i
+                                    data-lucide="lock"
+                                    style="width: 13px; height: 13px"
+                                ></i>
+                                Password
+                            </span>
+                        </label>
+                        <input
+                            type="password"
+                            id="signup-password"
+                            class="form-control"
+                            placeholder="Create a password"
+                            required
+                        />
+                    </div>
+
+                    <button
+                        type="submit"
+                        class="btn btn-primary"
+                        style="
+                            width: 100%;
+                            justify-content: center;
+                            margin-top: 0.5rem;
+                        "
+                    >
+                        <i data-lucide="user-plus"></i> Create Account
+                    </button>
+                </form>
+
+                <p
+                    style="
+                        margin-top: 1.5rem;
+                        font-size: 0.88rem;
+                        text-align: center;
+                        color: var(--ink-very-light);
+                    "
+                >
+                    Already have an account?
+                    <a
+                        href="javascript:void(0)"
+                        onclick="toggleAuth('login')"
+                        style="
+                            color: var(--warm);
+                            font-weight: 600;
+                            text-decoration: none;
+                        "
+                        >Log in here</a
+                    >
+                </p>
+            </div>
+        </div>
 
         <script>
             function toggleAuth(view) {
@@ -156,9 +291,14 @@
                     document.getElementById("login-view").style.display =
                         "block";
                 }
+                lucide.createIcons();
             }
         </script>
 
+        <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
         <script src="/static/js/app.js"></script>
+        <script>
+            lucide.createIcons();
+        </script>
     </body>
 </html>

@@ -3,112 +3,270 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>AI-Based Interview Simulation Platform</title>
+        <title>QuestionPrep — AI Interview Practice</title>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link
-            href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap"
+            href="https://fonts.googleapis.com/css2?family=Cormorant:ital,wght@0,300;0,400;1,300;1,400&family=Inter:wght@400;500;600&family=Lora:ital,wght@0,400;0,500;1,400;1,500&display=swap"
             rel="stylesheet"
         />
         <link rel="stylesheet" href="static/css/styles.css" />
     </head>
     <body>
-        <!-- Hero Section: Introduces the platform with a calming headline, subtext, CTA, and illustration placeholder -->
+        <!-- ── Navigation ── -->
+        <nav class="site-nav">
+            <div class="container">
+                <a href="/" class="nav-brand">QuestionPrep</a>
+                <div class="nav-links">
+                    <a href="/login" class="btn btn-outline btn-sm">
+                        <i data-lucide="log-in"></i> Sign in
+                    </a>
+                    <a href="/login" class="btn btn-primary btn-sm">
+                        <i data-lucide="play"></i> Start Practicing
+                    </a>
+                </div>
+            </div>
+        </nav>
+
+        <!-- ── Hero ── -->
         <section class="hero">
             <div class="container">
                 <div class="hero-content">
-                    <h1>Practice Interviews Without the Stress.</h1>
-                    <p>
+                    <h1>Practice Interviews<br />Without the Stress.</h1>
+                    <p class="page-subtitle">
                         AI-guided, anxiety-aware interview practice to help you
-                        speak confidently.
+                        speak with calm and confidence — at your own pace.
                     </p>
-                    <a href="/login" class="cta-button">Start Practicing</a>
+                    <a
+                        href="/login"
+                        class="btn btn-primary btn-lg"
+                        style="margin-top: 0.5rem"
+                    >
+                        <i data-lucide="play" class="icon-lg"></i> Begin your
+                        practice
+                    </a>
+                </div>
+                <div class="hero-illustration">
+                    A calm space to find your voice.
                 </div>
             </div>
         </section>
 
-        <!-- Why It Feels Safe Section: Three cards highlighting safety features -->
+        <!-- ── Why It Feels Safe ── -->
         <section class="why-safe">
             <div class="container">
-                <h2>Why It Feels Safe</h2>
+                <div class="section-label" style="text-align: center">
+                    Why it feels different
+                </div>
+                <h2
+                    style="
+                        text-align: center;
+                        font-size: 2rem;
+                        margin-bottom: 2.5rem;
+                    "
+                >
+                    Built around how you actually feel.
+                </h2>
                 <div class="cards">
-                    <div class="card">
-                        <div class="icon"></div>
+                    <div class="card" style="text-align: center">
+                        <div class="icon-circle">
+                            <i data-lucide="shield" class="icon-lg"></i>
+                        </div>
                         <h3>Safe Space</h3>
-                        <p>Judgment-free practice.</p>
+                        <p>
+                            A judgment-free environment where your pace is the
+                            right pace. No harsh scores, no pressure.
+                        </p>
                     </div>
-                    <div class="card">
-                        <div class="icon"></div>
+
+                    <div class="card" style="text-align: center">
+                        <div class="icon-circle">
+                            <i data-lucide="heart-pulse" class="icon-lg"></i>
+                        </div>
                         <h3>Anxiety-Aware AI</h3>
-                        <p>Detects stress gently.</p>
+                        <p>
+                            The system listens for stress in your voice and
+                            gently adapts — not to penalise you, but to support
+                            you.
+                        </p>
                     </div>
-                    <div class="card">
-                        <div class="icon"></div>
+
+                    <div class="card" style="text-align: center">
+                        <div class="icon-circle">
+                            <i data-lucide="message-circle" class="icon-lg"></i>
+                        </div>
                         <h3>Supportive Guidance</h3>
-                        <p>No harsh scoring, just improvements.</p>
+                        <p>
+                            Feedback that reads more like a letter from a
+                            thoughtful mentor than a grading rubric.
+                        </p>
                     </div>
                 </div>
             </div>
         </section>
 
-        <!-- How It Works Section: Three-step process with soft boxes -->
+        <!-- ── How It Works ── -->
         <section class="how-works">
             <div class="container">
-                <h2>How It Works</h2>
+                <div class="section-label" style="text-align: center">
+                    The process
+                </div>
+                <h2
+                    style="
+                        text-align: center;
+                        font-size: 2rem;
+                        margin-bottom: 2.5rem;
+                    "
+                >
+                    Three simple steps.
+                </h2>
                 <div class="steps">
                     <div class="step">
                         <div class="step-number">1</div>
+                        <i
+                            data-lucide="mic"
+                            class="icon-lg"
+                            style="color: var(--warm); margin-bottom: 0.75rem"
+                        ></i>
                         <h3>Speak your answer</h3>
+                        <p>
+                            Use your microphone or type — whichever feels more
+                            comfortable.
+                        </p>
                     </div>
                     <div class="step">
                         <div class="step-number">2</div>
-                        <h3>AI analyzes tone, pace, pauses</h3>
+                        <i
+                            data-lucide="activity"
+                            class="icon-lg"
+                            style="color: var(--warm); margin-bottom: 0.75rem"
+                        ></i>
+                        <h3>AI listens gently</h3>
+                        <p>
+                            Your tone, pace, and delivery are read with care —
+                            not judgment.
+                        </p>
                     </div>
                     <div class="step">
                         <div class="step-number">3</div>
-                        <h3>Get supportive feedback</h3>
+                        <i
+                            data-lucide="sparkles"
+                            class="icon-lg"
+                            style="color: var(--warm); margin-bottom: 0.75rem"
+                        ></i>
+                        <h3>Receive kind feedback</h3>
+                        <p>
+                            Small, actionable suggestions that build confidence
+                            over time.
+                        </p>
                     </div>
                 </div>
             </div>
         </section>
 
-        <!-- Features Grid: 3x2 grid of feature boxes -->
+        <!-- ── Features ── -->
         <section class="features">
             <div class="container">
-                <h2>Features</h2>
+                <div class="section-label" style="text-align: center">
+                    What's inside
+                </div>
+                <h2
+                    style="
+                        text-align: center;
+                        font-size: 2rem;
+                        margin-bottom: 2.5rem;
+                    "
+                >
+                    Everything you need to grow.
+                </h2>
                 <div class="grid">
-                    <div class="feature-box">Adaptive Questions (RAG)</div>
-                    <div class="feature-box">Speech Delivery Guidance</div>
-                    <div class="feature-box">Real-Time Vibration Alerts</div>
-                    <div class="feature-box">Semantic Answer Insights</div>
-                    <div class="feature-box">Progress Tracking</div>
-                    <div class="feature-box">ASR + TTS Interaction</div>
+                    <div class="feature-box">
+                        <div class="icon-circle">
+                            <i data-lucide="brain" class="icon-lg"></i>
+                        </div>
+                        Adaptive Questions (RAG)
+                    </div>
+                    <div class="feature-box">
+                        <div class="icon-circle">
+                            <i data-lucide="mic-2" class="icon-lg"></i>
+                        </div>
+                        Speech Delivery Guidance
+                    </div>
+                    <div class="feature-box">
+                        <div class="icon-circle">
+                            <i data-lucide="bell" class="icon-lg"></i>
+                        </div>
+                        Real-Time Stress Alerts
+                    </div>
+                    <div class="feature-box">
+                        <div class="icon-circle">
+                            <i data-lucide="search" class="icon-lg"></i>
+                        </div>
+                        Semantic Answer Insights
+                    </div>
+                    <div class="feature-box">
+                        <div class="icon-circle">
+                            <i data-lucide="trending-up" class="icon-lg"></i>
+                        </div>
+                        Progress Tracking
+                    </div>
+                    <div class="feature-box">
+                        <div class="icon-circle">
+                            <i data-lucide="audio-lines" class="icon-lg"></i>
+                        </div>
+                        ASR + TTS Interaction
+                    </div>
                 </div>
             </div>
         </section>
 
-        <!-- Final CTA Section: Encourages user to start -->
+        <!-- ── Final CTA ── -->
         <section class="final-cta">
-            <section class="final-cta">
-                <div class="container">
-                    <h2>Start building your interview confidence today.</h2>
-                    <a href="/login" class="cta-button">Begin Now</a>
+            <div class="container">
+                <div class="section-label" style="text-align: center">
+                    Ready?
                 </div>
-            </section>
+                <h2>Start building your interview confidence today.</h2>
+                <p
+                    class="page-subtitle"
+                    style="margin: 0 auto 2rem; text-align: center"
+                >
+                    It only takes a moment to begin.
+                </p>
+                <a href="/login" class="btn btn-primary btn-lg">
+                    <i data-lucide="arrow-right" class="icon-lg"></i> Begin Now
+                </a>
+            </div>
         </section>
 
-        <!-- Footer: Minimal info with placeholders -->
+        <!-- ── Footer ── -->
         <footer>
             <div class="container">
                 <div class="footer-content">
-                    <div class="logo-area">University Logo Placeholder</div>
-                    <div class="department">Department of Computer Science</div>
-                    <div class="names">
-                        Supervisor: Dr. Jane Doe | Student: John Smith
+                    <div
+                        style="
+                            font-family: &quot;Cormorant&quot;, Georgia, serif;
+                            font-size: 1.25rem;
+                            color: var(--ink);
+                        "
+                    >
+                        QuestionPrep
                     </div>
-                    <a href="#" class="github-link">GitHub</a>
+                    <div>Department of Computer Science</div>
+                    <div>
+                        Supervisor: Dr. Jane Doe &nbsp;·&nbsp; Student: John
+                        Smith
+                    </div>
+                    <a href="#" class="footer-link">
+                        <i data-lucide="github"></i> GitHub
+                    </a>
                 </div>
             </div>
         </footer>
+
+        <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+        <script>
+            lucide.createIcons();
+        </script>
     </body>
 </html>

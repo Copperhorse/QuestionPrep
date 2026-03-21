@@ -3,176 +3,146 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Interview Session - QuestionPrep</title>
+        <title>Interview Session — QuestionPrep</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link
-            href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap"
+            href="https://fonts.googleapis.com/css2?family=Cormorant:ital,wght@0,300;0,400;1,300;1,400&family=Inter:wght@400;500;600&family=Lora:ital,wght@0,400;0,500;1,400;1,500&display=swap"
             rel="stylesheet"
         />
         <link rel="stylesheet" href="/static/css/styles.css" />
 
         <!-- ONNX Runtime — must load before stress-detector.js -->
         <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
-
-        <style>
-            #stress-banner {
-                display: none;
-                max-width: 800px;
-                margin: 12px auto 0;
-                padding: 12px 20px;
-                border-radius: 12px;
-                font-size: 14px;
-                font-weight: 600;
-                text-align: center;
-                transition: all 0.3s ease;
-            }
-            #stress-banner.not_stressed {
-                background: #d1fae5;
-                color: #065f46;
-                border: 1px solid #6ee7b7;
-            }
-            #stress-banner.mild {
-                background: #fef9c3;
-                color: #713f12;
-                border: 1px solid #fde047;
-            }
-            #stress-banner.stressed {
-                background: #ffedd5;
-                color: #9a3412;
-                border: 1px solid #fdba74;
-            }
-            #stress-banner.highly_stressed {
-                background: #fee2e2;
-                color: #991b1b;
-                border: 1px solid #fca5a5;
-            }
-            #stress-banner.analyzing {
-                background: #f3f4f6;
-                color: #6b7280;
-                border: 1px solid #d1d5db;
-            }
-
-            #stress-details {
-                display: none;
-                max-width: 800px;
-                margin: 8px auto 0;
-                gap: 8px;
-                flex-wrap: wrap;
-                justify-content: center;
-            }
-            .stress-pill {
-                font-size: 12px;
-                padding: 4px 10px;
-                border-radius: 20px;
-                background: rgba(0, 0, 0, 0.06);
-                color: #374151;
-            }
-        </style>
     </head>
-    <body style="background-color: var(--pink-mist)">
-        <section style="padding: 40px 0">
+    <body>
+        <!-- ── Navigation ── -->
+        <nav class="site-nav">
             <div class="container">
-                <div
-                    style="
-                        display: flex;
-                        justify-content: space-between;
-                        align-items: center;
-                        margin-bottom: 20px;
-                    "
-                >
-                    <h2 style="margin: 0; text-align: left">
-                        Live Practice Session
-                    </h2>
-                    <!-- id added so interview.js can attach the click handler -->
-                    <button
-                        id="end-session-btn"
-                        class="cta-button"
+                <a href="/" class="nav-brand">QuestionPrep</a>
+                <div class="nav-links">
+                    <span
                         style="
-                            background-color: var(--pastel-rose);
-                            border: none;
-                            cursor: pointer;
-                            padding: 10px 20px;
+                            font-size: 0.88rem;
+                            color: var(--ink-very-light);
+                            font-style: italic;
+                            font-family: &quot;Lora&quot;, serif;
                         "
+                        >Live Practice Session</span
                     >
-                        End Session
+                    <button id="end-session-btn" class="btn btn-outline btn-sm">
+                        <i data-lucide="x-circle"></i> End Session
                     </button>
                 </div>
+            </div>
+        </nav>
 
-                <!-- chat-container is populated dynamically by interview.js -->
-                <div class="chat-container">
-                    <!-- loading state shown before DOMContentLoaded fires -->
+        <!-- ── Main ── -->
+        <section class="page-section">
+            <div class="container" style="max-width: 860px">
+                <!-- Page header -->
+                <div
+                    style="
+                        margin-bottom: 1.5rem;
+                        padding-bottom: 1.5rem;
+                        border-bottom: 1px solid var(--border);
+                    "
+                >
+                    <h1 style="font-size: clamp(1.6rem, 4vw, 2.2rem)">
+                        Live Practice Session
+                    </h1>
+                    <p class="page-subtitle">
+                        Take your time. Speak clearly. There is no rush here.
+                    </p>
+                </div>
+
+                <!-- Chat window -->
+                <div class="chat-container" id="chat-container">
+                    <!-- Populated dynamically by interview.js -->
                     <div
                         style="
                             text-align: center;
-                            opacity: 0.6;
+                            color: var(--ink-very-light);
                             font-style: italic;
-                            padding: 20px;
+                            font-family: &quot;Lora&quot;, serif;
+                            padding: 2rem;
                         "
                     >
                         Connecting to session…
                     </div>
                 </div>
 
-                <div style="max-width: 800px; margin: 0 auto">
-                    <div class="visualizer-wrapper" id="visualizer-container">
-                        <span class="visualizer-prompt" id="mic-prompt"
-                            >Click "Start Mic" to speak</span
-                        >
-                    </div>
+                <!-- Stress banner -->
+                <div id="stress-banner"></div>
+                <div id="stress-details"></div>
+
+                <!-- Audio visualizer -->
+                <div
+                    class="visualizer-wrapper"
+                    id="visualizer-container"
+                    style="margin-top: 1rem"
+                >
+                    <span class="visualizer-prompt" id="mic-prompt"
+                        >Click "Start Mic" to speak</span
+                    >
                 </div>
 
-                <div style="max-width: 800px; margin: 0 auto">
-                    <!-- interview.js listens to the submit event on this form -->
-                    <form class="input-area" id="chat-form">
-                        <button
-                            type="button"
-                            id="mic-btn"
-                            class="cta-button"
-                            style="
-                                background-color: var(--soft-lime);
-                                color: var(--soft-charcoal);
-                                border: none;
-                                cursor: pointer;
-                            "
-                        >
-                            🎙️ Start Mic
-                        </button>
-                        <textarea
-                            class="form-control"
-                            id="answer-text"
-                            rows="2"
-                            placeholder="Type your answer or speak…"
-                            style="resize: none"
-                        ></textarea>
-                        <button
-                            type="submit"
-                            class="cta-button"
-                            style="
-                                border: none;
-                                cursor: pointer;
-                                padding: 0 40px;
-                            "
-                        >
-                            Send
-                        </button>
-                    </form>
-                </div>
-            </div>
-
-            <!-- Stress indicator — shown after mic stops -->
-            <div id="stress-banner"></div>
-            <div id="stress-details"></div>
-
-            <div style="max-width: 800px; margin: 12px auto 0">
+                <!-- Playback -->
                 <audio
                     id="audio-playback"
                     controls
                     style="
                         display: none;
                         width: 100%;
-                        border-radius: 20px;
+                        border-radius: 6px;
                         outline: none;
+                        margin-top: 0.75rem;
                     "
                 ></audio>
+
+                <!-- Input area -->
+                <div class="input-area" style="margin-top: 1rem">
+                    <button
+                        type="button"
+                        id="mic-btn"
+                        class="btn btn-outline"
+                        style="white-space: nowrap; flex-shrink: 0"
+                    >
+                        <i data-lucide="mic"></i> Start Mic
+                    </button>
+                    <textarea
+                        class="form-control"
+                        id="answer-text"
+                        rows="2"
+                        placeholder="Type your answer or speak…"
+                        style="resize: none; flex: 1"
+                    ></textarea>
+                    <!-- chat-form wraps the submit so interview.js can attach its event -->
+                    <form id="chat-form" style="display: contents">
+                        <button
+                            type="submit"
+                            class="btn btn-primary"
+                            style="flex-shrink: 0; padding: 0 1.8rem"
+                        >
+                            <i data-lucide="send"></i> Send
+                        </button>
+                    </form>
+                </div>
+
+                <!-- End session note -->
+                <p
+                    style="
+                        margin-top: 1rem;
+                        font-size: 0.82rem;
+                        color: var(--ink-very-light);
+                        text-align: center;
+                        font-style: italic;
+                        font-family: &quot;Lora&quot;, serif;
+                    "
+                >
+                    Your answers are saved automatically. You can end the
+                    session at any time.
+                </p>
             </div>
         </section>
 
@@ -193,7 +163,6 @@
             const audioPlayback = document.getElementById("audio-playback");
             const stressBanner = document.getElementById("stress-banner");
             const stressDetails = document.getElementById("stress-details");
-            // answerText is shared with interview.js (both reference the same DOM node)
             const answerText = document.getElementById("answer-text");
 
             // ── State ─────────────────────────────────────────────────────────
@@ -238,27 +207,27 @@
                     minDecibels: -70,
                     smoothing: 0.7,
                 });
-                audioMotion.registerGradient("pastel", {
+                audioMotion.registerGradient("warm", {
                     bgColor: "transparent",
                     colorStops: [
-                        { pos: 0, color: "#93C5FD" },
-                        { pos: 0.5, color: "#C7D2FE" },
-                        { pos: 1, color: "#FBCFE8" },
+                        { pos: 0, color: "#b1682e" },
+                        { pos: 0.5, color: "#c97f3e" },
+                        { pos: 1, color: "#dfa56f" },
                     ],
                 });
-                audioMotion.setOptions({ gradient: "pastel" });
+                audioMotion.setOptions({ gradient: "warm" });
                 audioMotion.disconnectOutput();
             }
 
             // ── Stress UI ─────────────────────────────────────────────────────
             const STRESS_MESSAGES = {
-                not_stressed: "✅ You sound calm and composed. Great job!",
-                mild: "💛 Slight hesitation detected. Take a breath before answering.",
+                not_stressed: "You sound calm and composed. Keep going.",
+                mild: "Slight hesitation detected. Take a breath before continuing.",
                 stressed:
-                    "⚠️ You sound stressed. Try slowing down and speaking clearly.",
+                    "You sound a little stressed. Try slowing down and speaking clearly.",
                 highly_stressed:
-                    "🔴 High stress detected. Pause, breathe, and speak at a steady pace.",
-                analyzing: "⏳ Analysing your response…",
+                    "High stress detected. Pause, breathe, and speak at a steady pace.",
+                analyzing: "Analysing your response…",
             };
 
             function showStressBanner(level, details = null) {
@@ -268,12 +237,12 @@
 
                 if (details && level !== "analyzing") {
                     stressDetails.innerHTML = `
-                        <span class="stress-pill">Probability: ${(details.probability * 100).toFixed(0)}%</span>
-                        <span class="stress-pill">XGB: ${(details.modelScores.xgboost * 100).toFixed(0)}%</span>
-                        <span class="stress-pill">RF: ${(details.modelScores.randomForest * 100).toFixed(0)}%</span>
-                        <span class="stress-pill">LR: ${(details.modelScores.logisticRegression * 100).toFixed(0)}%</span>
-                        ${details.stutterFlag ? '<span class="stress-pill">🔁 Disfluency detected</span>' : ""}
-                    `;
+            <span class="stress-pill">Probability: ${(details.probability * 100).toFixed(0)}%</span>
+            <span class="stress-pill">XGB: ${(details.modelScores.xgboost * 100).toFixed(0)}%</span>
+            <span class="stress-pill">RF: ${(details.modelScores.randomForest * 100).toFixed(0)}%</span>
+            <span class="stress-pill">LR: ${(details.modelScores.logisticRegression * 100).toFixed(0)}%</span>
+            ${details.stutterFlag ? '<span class="stress-pill">Disfluency detected</span>' : ""}
+          `;
                     stressDetails.style.display = "flex";
                 } else {
                     stressDetails.style.display = "none";
@@ -314,7 +283,6 @@
             // ── Main analysis pipeline ────────────────────────────────────────
             async function runAnalysis(audioBlob) {
                 if (!detector) return;
-
                 showStressBanner("analyzing");
 
                 try {
@@ -323,7 +291,6 @@
                         analyzeOnServer(audioBlob),
                     ]);
 
-                    // Populate transcript into the shared textarea
                     if (serverResult.transcript) {
                         answerText.value = serverResult.transcript;
                     }
@@ -332,7 +299,6 @@
                         float32Audio,
                         serverResult.stutter_flag || false,
                     );
-
                     showStressBanner(stressResult.level, {
                         probability: stressResult.probability,
                         modelScores: stressResult.modelScores,
@@ -357,9 +323,11 @@
                     audioMotion.disconnectInput();
                     micStream = null;
 
-                    micBtn.innerText = "🎙️ Start Mic";
-                    micBtn.style.backgroundColor = "var(--soft-lime)";
+                    micBtn.innerHTML = '<i data-lucide="mic"></i> Start Mic';
+                    micBtn.classList.remove("btn-danger");
+                    micBtn.classList.add("btn-outline");
                     micPrompt.style.display = "block";
+                    lucide.createIcons();
                     return;
                 }
 
@@ -398,9 +366,11 @@
                     audioPlayback.style.display = "none";
                     hideStressBanner();
 
-                    micBtn.innerText = "🛑 Stop Mic";
-                    micBtn.style.backgroundColor = "var(--pastel-rose)";
+                    micBtn.innerHTML = '<i data-lucide="square"></i> Stop Mic';
+                    micBtn.classList.remove("btn-outline");
+                    micBtn.classList.add("btn-danger");
                     micPrompt.style.display = "none";
+                    lucide.createIcons();
                 } catch (err) {
                     console.error("Microphone access denied or failed:", err);
                     alert(
@@ -408,6 +378,11 @@
                     );
                 }
             });
+        </script>
+
+        <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+        <script>
+            lucide.createIcons();
         </script>
     </body>
 </html>

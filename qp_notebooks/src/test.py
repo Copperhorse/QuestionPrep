@@ -64,7 +64,10 @@ def _(chunk_enrichments, engine, mo):
 def _(chunk_questions, engine, mo):
     _df = mo.sql(
         f"""
-        SELECT * FROM chunk_questions
+        SELECT * 
+        FROM chunk_questions 
+        WHERE question_text LIKE '%space complexity of EXPANDER%O(1) per node%'
+           OR question_text LIKE '%data collection relate to the challenges in machine learning applications%';
         """,
         engine=engine
     )
@@ -85,7 +88,9 @@ def _(chunk_enrichments, chunk_questions, chunks, engine, mo):
             q.answer_text, 
             q.source_quote,
             c.content,
-            c.chunk_id
+            c.chunk_id,
+            e.summary,
+            c.file_id
         FROM chunk_questions q
         JOIN chunks c 
             ON q.chunk_id = c.chunk_id

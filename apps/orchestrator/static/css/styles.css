@@ -1,255 +1,1018 @@
-/* Root variables for colors to maintain consistency */
+/* =========================================
+   styles.css — QuestionPrep
+   Warm Paper Theme
+========================================= */
+
+/* ── Google Fonts (loaded in HTML heads, referenced here) ── */
+
 :root {
-    --periwinkle: #c7d2fe;
-    --baby-aqua: #a5f3fc;
-    --lavender: #e9d5ff;
-    --pink-mist: #fce7f3;
-    --soft-lime: #d9f99d;
-    --peach-pastel: #fde1c3;
-    --sky-blue: #93c5fd;
-    --pastel-rose: #fbcfe8;
-    --soft-charcoal: #475569;
-    --very-soft-navy: #334155;
-    --white: #ffffff;
+    --paper: #f5f1ea;
+    --paper-light: #fbfaf7;
+    --paper-deep: #e9e0d4;
+    --ink: #3a2f22;
+    --ink-light: #6b5a44;
+    --ink-very-light: #99897a;
+    --border: #e1d6c5;
+    --shadow: rgba(90, 55, 25, 0.07);
+
+    --warm: #c97f3e;
+    --warm-soft: #dfa56f;
+    --warm-dark: #b1682e;
+
+    --success: #6a9e76;
+    --info: #5a8aa8;
+    --warning: #c99a3e;
+    --danger: #c95a4e;
+
+    --bg-success: rgba(106, 158, 118, 0.12);
+    --bg-info: rgba(90, 138, 168, 0.12);
+    --bg-warning: rgba(201, 154, 62, 0.12);
+    --bg-danger: rgba(201, 90, 78, 0.12);
 }
 
-/* Global styles: Set font, reset margins, ensure calm mood with soft text colors */
-body {
-    font-family: "Inter", sans-serif;
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
     margin: 0;
     padding: 0;
-    background-color: var(--white);
-    color: var(--soft-charcoal);
-    line-height: 1.6;
 }
 
-/* Container for centering content with max width and large margins */
+body {
+    font-family: "Inter", system-ui, sans-serif;
+    background: var(--paper);
+    background-image:
+        radial-gradient(
+            ellipse 90% 50% at 50% 0%,
+            rgba(210, 170, 100, 0.13) 0%,
+            transparent 60%
+        ),
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+    color: var(--ink);
+    line-height: 1.7;
+}
+
+/* ── Layout ────────────────────────────────────────────────── */
 .container {
-    max-width: 1200px;
+    max-width: 1100px;
     margin: 0 auto;
-    padding: 0 40px; /* Large side padding for airy feel */
+    padding: 0 2.5rem;
 }
 
-/* Headings: Clean, modern, with soft colors */
-h1,
-h2,
-h3 {
-    color: var(--very-soft-navy);
-    margin-bottom: 20px;
-}
-
+/* ── Typography ────────────────────────────────────────────── */
 h1 {
-    font-size: 3rem;
-    font-weight: 700;
+    font-family: "Cormorant", Georgia, serif;
+    font-weight: 300;
+    font-size: clamp(2.2rem, 5vw, 3.2rem);
+    line-height: 1.1;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+    margin-bottom: 0.5rem;
 }
 
 h2 {
-    font-size: 2.5rem;
-    font-weight: 600;
-    text-align: center;
-    margin-bottom: 60px; /* Large spacing below headings */
+    font-family: "Lora", Georgia, serif;
+    font-size: 1.5rem;
+    font-weight: 400;
+    margin-bottom: 1.1rem;
+    color: var(--ink);
 }
 
 h3 {
-    font-size: 1.5rem;
-    font-weight: 600;
+    font-family: "Lora", Georgia, serif;
+    font-size: 1.15rem;
+    font-weight: 400;
+    margin-bottom: 0.6rem;
+    color: var(--ink);
 }
 
-/* CTA Button: Rounded, pastel, with subtle hover */
+p {
+    color: var(--ink-light);
+    line-height: 1.75;
+}
+
+.page-subtitle {
+    font-family: "Lora", Georgia, serif;
+    font-style: italic;
+    font-size: 1rem;
+    color: var(--ink-very-light);
+    max-width: 52ch;
+    line-height: 1.7;
+}
+
+.section-label {
+    font-family: "Inter", sans-serif;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-very-light);
+    margin-bottom: 1.1rem;
+}
+
+/* ── Buttons ───────────────────────────────────────────────── */
+.btn,
 .cta-button {
-    display: inline-block;
-    background-color: var(--sky-blue);
-    color: var(--white);
-    padding: 15px 30px;
-    border-radius: 30px; /* Rounded corners */
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.72rem 1.5rem;
+    border-radius: 6px;
+    font-family: "Inter", sans-serif;
+    font-size: 0.88rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    border: none;
+    white-space: nowrap;
+    letter-spacing: 0.01em;
     text-decoration: none;
-    font-weight: 600;
-    transition:
-        transform 0.2s ease,
-        box-shadow 0.2s ease;
-    box-shadow: 0 4px 10px rgba(147, 197, 253, 0.3); /* Gentle shadow */
 }
 
+.btn-primary,
+.cta-button {
+    background: var(--warm);
+    color: #fff;
+    box-shadow: 0 2px 12px rgba(201, 127, 62, 0.3);
+}
+.btn-secondary {
+    background: var(--warm-soft);
+    color: #fff;
+}
+.btn-outline {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--ink);
+}
+.btn-ghost {
+    background: transparent;
+    color: var(--ink-light);
+}
+.btn-success {
+    background: var(--success);
+    color: #fff;
+}
+.btn-danger {
+    background: var(--danger);
+    color: #fff;
+}
+.btn-dark {
+    background: var(--ink);
+    color: var(--paper-light);
+}
+
+.btn:hover,
 .cta-button:hover {
-    transform: scale(1.05); /* Subtle hover scale */
-    box-shadow: 0 6px 15px rgba(147, 197, 253, 0.4);
+    filter: brightness(1.07);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px rgba(90, 55, 25, 0.15);
+}
+.btn-primary:hover,
+.cta-button:hover {
+    box-shadow: 0 4px 20px rgba(201, 127, 62, 0.4);
+}
+.btn:active,
+.cta-button:active {
+    transform: translateY(0);
 }
 
-/* Hero Section: Gradient background, flex layout, responsive stacking */
-.hero {
-    background: linear-gradient(
-        to right,
-        var(--lavender),
-        var(--baby-aqua)
-    ); /* Soft pastel gradient */
-    padding: 80px 0; /* Large vertical padding */
+.btn-sm {
+    padding: 0.48rem 1rem;
+    font-size: 0.82rem;
+}
+.btn-lg {
+    padding: 1rem 2.2rem;
+    font-size: 1rem;
+    letter-spacing: 0.02em;
+}
+
+.btn-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+}
+
+/* ── Cards ─────────────────────────────────────────────────── */
+.card {
+    background: var(--paper-light);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.8rem 2.2rem;
+    box-shadow: 0 2px 16px var(--shadow);
+    transition: box-shadow 0.4s ease;
+}
+.card:hover {
+    box-shadow: 0 4px 24px rgba(90, 55, 25, 0.1);
+}
+
+.card-feedback {
+    background: var(--paper-light);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--warm);
+    border-radius: 8px;
+    padding: 2.5rem 2.8rem;
+    box-shadow: 0 4px 28px rgba(90, 55, 25, 0.09);
+}
+
+.card-feedback .feedback-text {
+    font-family: "Lora", Georgia, serif;
+    font-style: italic;
+    font-size: 1.05rem;
+    color: var(--ink-light);
+    line-height: 1.85;
+}
+
+.feedback-glow {
+    color: var(--warm);
+    font-style: italic;
+}
+
+.card-header {
+    padding: 0 0 1rem 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 1.2rem;
+    font-family: "Inter", sans-serif;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-very-light);
+}
+
+/* ── Alerts ────────────────────────────────────────────────── */
+.alert {
+    padding: 1.1rem 1.4rem;
+    border-radius: 6px;
+    margin: 1.2rem 0;
+    border-left: 3px solid;
+    font-size: 0.95rem;
+    line-height: 1.75;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+}
+.alert-info {
+    background: var(--bg-info);
+    border-color: var(--info);
+    color: #2a4a5c;
+}
+.alert-success {
+    background: var(--bg-success);
+    border-color: var(--success);
+    color: #2f4a38;
+}
+.alert-warning {
+    background: var(--bg-warning);
+    border-color: var(--warning);
+    color: #5c4518;
+}
+.alert-danger {
+    background: var(--bg-danger);
+    border-color: var(--danger);
+    color: #5c2a26;
+}
+
+/* ── Badges ────────────────────────────────────────────────── */
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.3rem 0.85rem;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    letter-spacing: 0.03em;
+}
+.badge-success {
+    background: rgba(106, 158, 118, 0.15);
+    color: #3a6a48;
+    border: 1px solid rgba(106, 158, 118, 0.3);
+}
+.badge-warning {
+    background: rgba(201, 154, 62, 0.15);
+    color: #7a5018;
+    border: 1px solid rgba(201, 154, 62, 0.3);
+}
+.badge-danger {
+    background: rgba(201, 90, 78, 0.12);
+    color: #8a2a24;
+    border: 1px solid rgba(201, 90, 78, 0.25);
+}
+.badge-warm {
+    background: rgba(201, 127, 62, 0.15);
+    color: var(--warm-dark);
+    border: 1px solid rgba(201, 127, 62, 0.3);
+}
+.badge-info {
+    background: var(--bg-info);
+    color: #2a4a5c;
+    border: 1px solid rgba(90, 138, 168, 0.3);
+}
+
+/* ── Progress ──────────────────────────────────────────────── */
+.progress-bar {
+    height: 6px;
+    background: var(--paper-deep);
+    border-radius: 999px;
+    overflow: hidden;
+    margin: 0.6rem 0;
+}
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--warm-dark), var(--warm));
+    transition: width 1s cubic-bezier(0.16, 1, 0.3, 1);
+    border-radius: 999px;
+}
+
+/* ── Forms ─────────────────────────────────────────────────── */
+.form-group {
+    margin-bottom: 1.2rem;
     text-align: left;
+}
+
+label {
+    display: block;
+    margin-bottom: 0.4rem;
+    font-size: 0.88rem;
+    font-weight: 500;
+    color: var(--ink-light);
+    letter-spacing: 0.01em;
+}
+
+.form-control,
+input:not([type="checkbox"]):not([type="radio"]),
+textarea,
+select {
+    width: 100%;
+    padding: 0.78rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-family: "Inter", sans-serif;
+    font-size: 0.95rem;
+    background: var(--paper-light);
+    color: var(--ink);
+    margin: 0.3rem 0;
+    transition:
+        border-color 0.4s ease,
+        box-shadow 0.4s ease;
+    box-sizing: border-box;
+}
+
+.form-control:focus,
+input:not([type="checkbox"]):not([type="radio"]):focus,
+textarea:focus,
+select:focus {
+    outline: none;
+    border-color: var(--warm);
+    box-shadow: 0 0 0 3px rgba(201, 127, 62, 0.12);
+}
+
+input::placeholder,
+textarea::placeholder {
+    color: var(--ink-very-light);
+    font-style: italic;
+}
+
+select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2399897a' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 1rem center;
+    padding-right: 2.5rem;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+    width: 1rem;
+    height: 1rem;
+    min-width: 1rem;
+    cursor: pointer;
+    accent-color: var(--warm);
+    flex-shrink: 0;
+}
+
+.checkbox-group,
+.radio-group {
+    margin: 1.2rem 0;
+}
+.checkbox-group label,
+.radio-group label {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    margin: 0.55rem 0;
+    font-weight: 400;
+    color: var(--ink-light);
+    font-size: 0.95rem;
+    cursor: pointer;
+    line-height: 1.4;
+}
+
+/* ── Auth card ─────────────────────────────────────────────── */
+.auth-card {
+    background: var(--paper-light);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 2.8rem 3rem;
+    max-width: 420px;
+    margin: 0 auto;
+    box-shadow: 0 4px 28px var(--shadow);
+}
+
+/* ── Tabs ──────────────────────────────────────────────────── */
+.tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 2.2rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 1rem;
+}
+
+.tab-btn {
+    background: none;
+    border: none;
+    font-family: "Inter", sans-serif;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--ink-very-light);
+    cursor: pointer;
+    padding: 0.5rem 1.1rem;
+    border-radius: 6px;
+    transition: all 0.25s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+.tab-btn.active,
+.tab-btn:hover {
+    background: rgba(201, 127, 62, 0.1);
+    color: var(--warm-dark);
+}
+.tab-btn.active {
+    font-weight: 600;
+}
+
+.tab-content {
+    display: none;
+    animation: fadeIn 0.3s ease;
+}
+.tab-content.active {
+    display: block;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ── Table ─────────────────────────────────────────────────── */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.94rem;
+}
+.card-table {
+    padding: 0;
+    overflow: hidden;
+}
+th {
+    padding: 1rem 1.2rem;
+    text-align: left;
+    font-family: "Inter", sans-serif;
+    font-weight: 600;
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-very-light);
+    border-bottom: 1px solid var(--border);
+    background: rgba(233, 224, 212, 0.3);
+}
+td {
+    padding: 1rem 1.2rem;
+    text-align: left;
+    border-bottom: 1px solid rgba(225, 214, 197, 0.5);
+    vertical-align: middle;
+}
+tr:last-child td {
+    border-bottom: none;
+}
+tr:hover td {
+    background: rgba(251, 249, 245, 0.8);
+}
+td.feeling-positive {
+    font-family: "Lora", Georgia, serif;
+    font-style: italic;
+    color: var(--warm);
+    font-size: 0.93rem;
+}
+td.feeling-neutral {
+    font-family: "Lora", Georgia, serif;
+    font-style: italic;
+    color: var(--ink-light);
+    font-size: 0.93rem;
+}
+.table-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border-radius: 8px;
+}
+.table-scroll table {
+    min-width: 520px;
+}
+
+/* ── Chat ──────────────────────────────────────────────────── */
+.chat-container {
+    display: flex;
+    flex-direction: column;
+    gap: 1.2rem;
+    max-width: 800px;
+    margin: 0 auto;
+    background: var(--paper-light);
+    border: 1px solid var(--border);
+    padding: 2rem;
+    border-radius: 8px;
+    box-shadow: 0 2px 16px var(--shadow);
+    min-height: 50vh;
+}
+
+.message,
+.chat-message {
+    max-width: 80%;
+    padding: 1.1rem 1.5rem;
+    border-radius: 12px;
+    line-height: 1.75;
+    font-size: 0.97rem;
+}
+
+.msg-ai,
+.chat-assistant {
+    background: var(--paper-light);
+    border: 1px solid var(--border);
+    color: var(--ink-light);
+    align-self: flex-start;
+    border-bottom-left-radius: 3px;
+    font-family: "Lora", Georgia, serif;
+    font-style: italic;
+}
+
+.msg-user,
+.chat-user {
+    background: var(--warm);
+    color: #fff;
+    align-self: flex-end;
+    border-bottom-right-radius: 3px;
+    box-shadow: 0 2px 12px rgba(201, 127, 62, 0.25);
+}
+
+.msg-feedback {
+    background: var(--paper-light);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--warm);
+    align-self: flex-start;
+    border-bottom-left-radius: 3px;
+    max-width: 85%;
+}
+
+.chat-label {
+    display: block;
+    font-family: "Inter", sans-serif;
+    font-style: normal;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-very-light);
+    margin-bottom: 0.45rem;
+}
+
+.input-area {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1.2rem;
+    max-width: 800px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+/* ── Visualizer ────────────────────────────────────────────── */
+.visualizer-wrapper {
+    width: 100%;
+    height: 120px;
+    background: var(--paper-light);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-top: 1.2rem;
+    box-shadow: 0 2px 12px var(--shadow);
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.visualizer-prompt {
+    position: absolute;
+    color: var(--ink-very-light);
+    font-family: "Lora", Georgia, serif;
+    font-style: italic;
+    font-size: 0.9rem;
+    z-index: 10;
+    pointer-events: none;
+}
+
+/* ── Hero ──────────────────────────────────────────────────── */
+.hero {
+    background: var(--paper-deep);
+    border-bottom: 1px solid var(--border);
+    padding: 5rem 0;
 }
 
 .hero .container {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 40px; /* Whitespace between elements */
+    gap: 3rem;
 }
 
 .hero-content {
     flex: 1;
 }
+.hero-content .page-subtitle {
+    margin-top: 0.8rem;
+    margin-bottom: 2rem;
+}
 
 .hero-illustration {
     flex: 1;
-    height: 300px;
-    background-color: var(--pink-mist); /* Placeholder color */
-    border-radius: 20px; /* Rounded corners */
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1); /* Gentle shadow */
-}
-
-/* Why Safe Section: Cards with flex, pastel backgrounds, shadows */
-.why-safe {
-    padding: 80px 0;
-}
-
-.cards {
+    height: 280px;
+    background: rgba(201, 127, 62, 0.08);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 4px 20px var(--shadow);
     display: flex;
-    justify-content: space-around;
-    gap: 40px; /* Large spacing */
+    align-items: center;
+    justify-content: center;
+    color: var(--ink-very-light);
+    font-family: "Lora", Georgia, serif;
+    font-style: italic;
 }
 
-.card {
-    background-color: var(--peach-pastel);
-    padding: 40px;
-    border-radius: 20px;
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
-    text-align: center;
-    flex: 1;
-    transition: transform 0.2s ease;
-}
-
-.card:hover {
-    transform: translateY(-5px); /* Subtle hover lift */
-}
-
-.icon {
-    width: 60px;
-    height: 60px;
-    background-color: var(--soft-lime);
-    border-radius: 50%; /* Circle placeholder */
-    margin: 0 auto 20px;
-}
-
-/* How Works Section: Steps with flex, numbered boxes */
+/* ── Why Section Cards ─────────────────────────────────────── */
+.why-safe,
+.features,
 .how-works {
-    padding: 80px 0;
-    background-color: var(--pink-mist); /* Soft background for section */
+    padding: 5rem 0;
 }
 
+.how-works {
+    background: rgba(233, 224, 212, 0.3);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+}
+
+.cards,
 .steps {
     display: flex;
-    justify-content: space-around;
-    gap: 40px;
+    gap: 1.5rem;
+    justify-content: space-between;
 }
 
-.step {
-    background-color: var(--white);
-    padding: 40px;
-    border-radius: 20px;
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
-    text-align: center;
+.cards .card,
+.steps .step {
     flex: 1;
-    border: 1px solid var(--lavender); /* Soft border */
-    transition: box-shadow 0.2s ease;
+    text-align: center;
 }
 
-.step:hover {
-    box-shadow: 0 6px 15px rgba(0, 0, 0, 0.15);
+.cards .card {
+    background: var(--paper-light);
 }
 
-.step-number {
-    width: 40px;
-    height: 40px;
-    background-color: var(--pastel-rose);
-    color: var(--white);
+.icon-circle {
+    width: 48px;
+    height: 48px;
+    background: rgba(201, 127, 62, 0.12);
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    margin: 0 auto 20px;
-    font-weight: 700;
+    margin: 0 auto 1rem;
+    color: var(--warm);
 }
 
-/* Features Section: Grid layout, responsive */
-.features {
-    padding: 80px 0;
+.step {
+    background: var(--paper-light);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 2rem;
+    text-align: center;
+    box-shadow: 0 2px 16px var(--shadow);
+    transition: box-shadow 0.3s ease;
+}
+.step:hover {
+    box-shadow: 0 4px 24px rgba(90, 55, 25, 0.1);
 }
 
+.step-number {
+    width: 36px;
+    height: 36px;
+    background: var(--warm);
+    color: #fff;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 1rem;
+    font-weight: 600;
+    font-size: 0.9rem;
+    box-shadow: 0 2px 8px rgba(201, 127, 62, 0.3);
+}
+
+/* ── Feature Grid ──────────────────────────────────────────── */
 .grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 40px; /* Large spacing */
+    gap: 1.5rem;
 }
 
 .feature-box {
-    background-color: var(--soft-lime);
-    padding: 40px;
-    border-radius: 20px;
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+    background: var(--paper-light);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.8rem;
     text-align: center;
-    font-weight: 600;
+    box-shadow: 0 2px 12px var(--shadow);
+    font-family: "Inter", sans-serif;
+    font-weight: 500;
+    font-size: 0.95rem;
+    color: var(--ink-light);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+    transition: box-shadow 0.3s ease;
+}
+.feature-box:hover {
+    box-shadow: 0 4px 20px rgba(90, 55, 25, 0.1);
+}
+.feature-box .icon-circle {
+    margin: 0;
 }
 
-/* Final CTA: Pastel block, centered */
+/* ── Final CTA ─────────────────────────────────────────────── */
 .final-cta {
-    background-color: var(--periwinkle);
-    padding: 80px 0;
+    background: var(--paper-deep);
+    border-top: 1px solid var(--border);
+    padding: 5rem 0;
     text-align: center;
 }
-
 .final-cta h2 {
-    margin-bottom: 40px;
-}
-
-/* Footer: Minimal, soft text, flex for alignment */
-footer {
-    background-color: var(--white);
-    padding: 40px 0;
-    border-top: 1px solid var(--lavender);
+    font-size: 2rem;
+    margin-bottom: 1.5rem;
     text-align: center;
-    color: var(--soft-charcoal);
 }
 
+/* ── Nav ───────────────────────────────────────────────────── */
+.site-nav {
+    background: var(--paper-light);
+    border-bottom: 1px solid var(--border);
+    padding: 1.2rem 0;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 1px 8px var(--shadow);
+}
+.site-nav .container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.nav-brand {
+    font-family: "Cormorant", Georgia, serif;
+    font-size: 1.5rem;
+    font-weight: 300;
+    color: var(--ink);
+    text-decoration: none;
+    letter-spacing: -0.01em;
+}
+.nav-links {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+}
+
+/* ── Page sections ─────────────────────────────────────────── */
+.page-section {
+    padding: 3.5rem 0;
+}
+.page-hero {
+    background: var(--paper-deep);
+    border-bottom: 1px solid var(--border);
+    padding: 3rem 0 2.5rem;
+}
+
+/* ── Footer ────────────────────────────────────────────────── */
+footer {
+    background: var(--paper-light);
+    border-top: 1px solid var(--border);
+    padding: 2.5rem 0;
+    text-align: center;
+}
 .footer-content {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--ink-very-light);
+    font-size: 0.88rem;
 }
-
-.github-link {
-    color: var(--sky-blue);
+.footer-link {
+    color: var(--warm);
     text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-weight: 500;
 }
-
-.github-link:hover {
+.footer-link:hover {
+    color: var(--warm-dark);
     text-decoration: underline;
 }
 
-/* Responsive Media Queries: Stack elements on mobile */
+/* ── Dialog ────────────────────────────────────────────────── */
+.dialog-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(40, 25, 10, 0.45);
+    backdrop-filter: blur(2px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+}
+.dialog {
+    background: var(--paper-light);
+    border-radius: 8px;
+    width: 90%;
+    max-width: 420px;
+    padding: 2.2rem;
+    box-shadow: 0 12px 50px rgba(90, 55, 25, 0.28);
+    border: 1px solid var(--border);
+}
+.dialog-header {
+    font-family: "Lora", Georgia, serif;
+    font-size: 1.25rem;
+    font-weight: 400;
+    margin-bottom: 0.8rem;
+    color: var(--ink);
+}
+
+/* ── Profile / file cards ──────────────────────────────────── */
+.file-card {
+    background: var(--paper-light);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.8rem;
+    box-shadow: 0 2px 16px var(--shadow);
+    transition: box-shadow 0.35s ease;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+.file-card:hover {
+    box-shadow: 0 4px 24px rgba(90, 55, 25, 0.1);
+}
+
+.file-card-title {
+    font-family: "Lora", Georgia, serif;
+    font-size: 1.05rem;
+    color: var(--ink);
+    word-break: break-word;
+}
+.file-card-meta {
+    font-size: 0.82rem;
+    color: var(--ink-very-light);
+}
+.file-card-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    margin-top: 0.5rem;
+}
+
+/* ── Stress banner (interview page) ───────────────────────── */
+#stress-banner {
+    display: none;
+    max-width: 800px;
+    margin: 1rem auto 0;
+    padding: 0.85rem 1.4rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    text-align: center;
+    border-left: 3px solid;
+    transition: all 0.3s ease;
+}
+#stress-banner.not_stressed {
+    background: var(--bg-success);
+    color: #2f4a38;
+    border-color: var(--success);
+}
+#stress-banner.mild {
+    background: var(--bg-warning);
+    color: #5c4518;
+    border-color: var(--warning);
+}
+#stress-banner.stressed {
+    background: rgba(201, 154, 62, 0.14);
+    color: #7a5018;
+    border-color: var(--warning);
+}
+#stress-banner.highly_stressed {
+    background: var(--bg-danger);
+    color: #5c2a26;
+    border-color: var(--danger);
+}
+#stress-banner.analyzing {
+    background: rgba(90, 55, 25, 0.05);
+    color: var(--ink-very-light);
+    border-color: var(--border);
+}
+
+#stress-details {
+    display: none;
+    max-width: 800px;
+    margin: 0.5rem auto 0;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+.stress-pill {
+    font-size: 0.78rem;
+    padding: 0.25rem 0.75rem;
+    border-radius: 999px;
+    background: rgba(90, 55, 25, 0.06);
+    color: var(--ink-light);
+    border: 1px solid var(--border);
+}
+
+/* ── Lucide icon sizing ────────────────────────────────────── */
+.lucide,
+[data-lucide] {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+}
+.icon-lg {
+    width: 22px;
+    height: 22px;
+}
+.icon-xl {
+    width: 28px;
+    height: 28px;
+}
+
+/* ── Utility ───────────────────────────────────────────────── */
+.text-center {
+    text-align: center;
+}
+.mt-1 {
+    margin-top: 0.5rem;
+}
+.mt-2 {
+    margin-top: 1rem;
+}
+.mt-3 {
+    margin-top: 1.5rem;
+}
+.mb-1 {
+    margin-bottom: 0.5rem;
+}
+.mb-2 {
+    margin-bottom: 1rem;
+}
+.mb-3 {
+    margin-bottom: 1.5rem;
+}
+
+/* ── Responsive ────────────────────────────────────────────── */
 @media (max-width: 768px) {
     .hero .container {
         flex-direction: column;
-        text-align: center;
     }
-
     .hero-illustration {
-        height: 200px;
-        margin-top: 40px;
+        height: 180px;
     }
-
     .cards,
     .steps {
         flex-direction: column;
     }
-
     .grid {
         grid-template-columns: repeat(2, 1fr);
     }
@@ -259,176 +1022,13 @@ footer {
     .grid {
         grid-template-columns: 1fr;
     }
-
-    h1 {
-        font-size: 2.5rem;
-    }
-
-    h2 {
-        font-size: 2rem;
-    }
-
     .container {
-        padding: 0 20px;
+        padding: 0 1.2rem;
     }
-}
-/* =========================================
-   NEW UI COMPONENTS (Forms, Tabs, Chat)
-========================================= */
-
-/* Forms & Inputs */
-.form-group {
-    margin-bottom: 20px;
-    text-align: left;
-}
-
-.form-group label {
-    display: block;
-    margin-bottom: 8px;
-    font-weight: 600;
-    font-size: 0.9rem;
-}
-
-.form-control {
-    width: 100%;
-    padding: 15px;
-    border: 2px solid var(--lavender);
-    border-radius: 15px;
-    font-family: "Inter", sans-serif;
-    font-size: 1rem;
-    box-sizing: border-box;
-    transition:
-        border-color 0.2s ease,
-        box-shadow 0.2s ease;
-}
-
-.form-control:focus {
-    outline: none;
-    border-color: var(--sky-blue);
-    box-shadow: 0 0 0 3px rgba(147, 197, 253, 0.2);
-}
-
-.auth-card {
-    background: var(--white);
-    padding: 40px;
-    border-radius: 20px;
-    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
-    max-width: 400px;
-    margin: 0 auto;
-    text-align: center;
-}
-
-/* Tabs for Profile Page */
-.tabs {
-    display: flex;
-    gap: 15px;
-    margin-bottom: 30px;
-    border-bottom: 2px solid var(--pink-mist);
-    padding-bottom: 15px;
-    justify-content: center;
-}
-
-.tab-btn {
-    background: none;
-    border: none;
-    font-size: 1.1rem;
-    font-weight: 600;
-    color: var(--soft-charcoal);
-    cursor: pointer;
-    padding: 10px 20px;
-    border-radius: 15px;
-    transition: background-color 0.2s ease;
-}
-
-.tab-btn.active,
-.tab-btn:hover {
-    background-color: var(--lavender);
-    color: var(--very-soft-navy);
-}
-
-.tab-content {
-    display: none;
-    animation: fadeIn 0.3s ease;
-}
-
-.tab-content.active {
-    display: block;
-}
-
-@keyframes fadeIn {
-    from {
-        opacity: 0;
-        transform: translateY(5px);
+    .auth-card {
+        padding: 2rem 1.5rem;
     }
-    to {
-        opacity: 1;
-        transform: translateY(0);
+    .chat-container {
+        padding: 1.2rem;
     }
-}
-
-/* Interview Chat Interface */
-.chat-container {
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-    max-width: 800px;
-    margin: 0 auto;
-    background: var(--white);
-    padding: 30px;
-    border-radius: 20px;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
-    min-height: 50vh;
-}
-
-.message {
-    padding: 20px;
-    border-radius: 20px;
-    max-width: 80%;
-    line-height: 1.6;
-    font-size: 1.1rem;
-}
-
-.msg-ai {
-    background-color: var(--periwinkle);
-    align-self: flex-start;
-    border-bottom-left-radius: 5px;
-}
-
-.msg-user {
-    background-color: var(--soft-lime);
-    align-self: flex-end;
-    border-bottom-right-radius: 5px;
-}
-
-.input-area {
-    display: flex;
-    gap: 15px;
-    margin-top: 20px;
-}
-/* =========================================
-   AUDIO VISUALIZER
-========================================= */
-.visualizer-wrapper {
-    width: 100%;
-    height: 120px;
-    background-color: var(--white);
-    border: 2px solid var(--pink-mist);
-    border-radius: 20px;
-    overflow: hidden; /* Keeps the canvas inside the rounded corners */
-    margin-top: 20px;
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
-    position: relative;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-}
-
-/* Optional: A gentle text prompt before the mic starts */
-.visualizer-prompt {
-    position: absolute;
-    color: var(--soft-charcoal);
-    font-weight: 600;
-    z-index: 10;
-    pointer-events: none;
-    opacity: 0.7;
 }

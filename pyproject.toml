@@ -10,7 +10,8 @@ dependencies = [
     "faster-whisper>=1.2.1",
         "qp-core",
         "qp-pipeline",
-        "qp-voice"
+        "qp-voice",
+        "qp_notebooks"
 ]
 
 [tool.uv.workspace]
@@ -24,3 +25,4 @@ members = [
 qp-core = { workspace = true }
 qp-pipeline = { workspace = true }
 qp-voice = { workspace = true }
+qp_notebooks = { workspace = true}

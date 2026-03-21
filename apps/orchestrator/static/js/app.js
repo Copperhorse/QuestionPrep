@@ -4,6 +4,29 @@
 
 const API_BASE = "";
 
+// ── Inline SVG icon helper (for dynamically injected cards) ──────────────────
+const ICON_PATHS = {
+  play: '<polygon points="6 3 20 12 6 21 6 3"/>',
+  sparkles:
+    '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+};
+
+function icon(name, size = 16) {
+  const p = ICON_PATHS[name];
+  if (!p) return "";
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:middle;flex-shrink:0;">${p}</svg>`;
+}
+
+// ── Modal helper — falls back to native alert() on non-profile pages ──────────
+function notify(title, body, type = "info") {
+  if (typeof showModal === "function") {
+    showModal(title, body, type);
+  } else {
+    alert(`${title}\n\n${body}`);
+  }
+}
+
 // ==========================================
 // 1. AUTHENTICATION LOGIC (Login & Signup)
 // ==========================================
@@ -32,19 +55,20 @@ if (loginForm) {
       const data = await response.json();
 
       if (response.ok) {
-        // DBManager returns 'user_id' as the primary key field name
         const userId = data.user.user_id || data.user.id;
-
         localStorage.setItem("qp_token", data.token);
         localStorage.setItem("qp_user_id", userId);
-
         window.location.href = "/profile";
       } else {
-        alert(`Login failed: ${data.detail}`);
+        notify("Login failed", data.detail, "error");
       }
     } catch (error) {
       console.error("Error logging in:", error);
-      alert("A network error occurred. Is the FastAPI server running?");
+      notify(
+        "Network error",
+        "Could not reach the server. Is the FastAPI server running?",
+        "error",
+      );
     } finally {
       submitBtn.innerText = originalText;
       submitBtn.disabled = false;
@@ -77,16 +101,20 @@ if (signupForm) {
       const data = await response.json();
 
       if (response.ok) {
-        alert("Account created successfully! Please log in.");
+        notify(
+          "Account created",
+          "Your account is ready. Please log in to continue.",
+          "success",
+        );
         signupForm.reset();
         document.getElementById("signup-view").style.display = "none";
         document.getElementById("login-view").style.display = "block";
       } else {
-        alert(`Sign up failed: ${data.detail}`);
+        notify("Sign up failed", data.detail, "error");
       }
     } catch (error) {
       console.error("Error signing up:", error);
-      alert("A network error occurred.");
+      notify("Network error", "A network error occurred.", "error");
     } finally {
       submitBtn.innerText = originalText;
       submitBtn.disabled = false;
@@ -98,14 +126,9 @@ if (signupForm) {
 // 2. QUESTION GENERATION (Profile Page)
 // ==========================================
 
-/**
- * Trigger LLM enrichment + vector indexing for a specific file.
- * Called from the "Generate Questions" button on each file card.
- * The backend task is async — this just kicks it off.
- */
 async function generateQuestions(fileId, btn) {
-  const originalText = btn.innerText;
-  btn.innerText = "Starting...";
+  const originalHTML = btn.innerHTML;
+  btn.innerHTML = `${icon("sparkles")} Starting…`;
   btn.disabled = true;
 
   try {
@@ -118,19 +141,23 @@ async function generateQuestions(fileId, btn) {
     const data = await response.json();
 
     if (response.ok) {
-      btn.innerText = "✓ Generating in background";
-      btn.style.backgroundColor = "var(--soft-lime)";
-      btn.style.color = "var(--very-soft-navy)";
-      // Leave disabled — re-triggering enrichment is wasteful
+      btn.innerHTML = `${icon("check")} Generating in background`;
+      btn.style.background = "var(--bg-success)";
+      btn.style.color = "var(--success)";
+      btn.style.borderColor = "var(--success)";
     } else {
-      alert(`Failed to start generation: ${data.detail}`);
-      btn.innerText = originalText;
+      notify("Generation failed", data.detail, "error");
+      btn.innerHTML = originalHTML;
       btn.disabled = false;
     }
   } catch (error) {
     console.error("Generate questions failed:", error);
-    alert("A network error occurred during question generation.");
-    btn.innerText = originalText;
+    notify(
+      "Network error",
+      "A network error occurred during question generation.",
+      "error",
+    );
+    btn.innerHTML = originalHTML;
     btn.disabled = false;
   }
 }
@@ -145,9 +172,10 @@ async function fetchUserFiles() {
 
   if (!userId || !filesGrid) return;
 
-  // Show a loading state while fetching
-  filesGrid.innerHTML =
-    "<p style='grid-column: 1 / -1; text-align: center; color: var(--soft-charcoal); opacity: 0.6;'>Loading your files…</p>";
+  filesGrid.innerHTML = `
+    <p style="grid-column:1/-1; text-align:center; color:var(--ink-very-light); font-style:italic; font-family:'Lora',serif;">
+      Loading your files…
+    </p>`;
 
   try {
     const response = await fetch(`${API_BASE}/api/files?user_id=${userId}`);
@@ -156,14 +184,15 @@ async function fetchUserFiles() {
     filesGrid.innerHTML = "";
 
     if (!response.ok) {
-      filesGrid.innerHTML =
-        "<p style='grid-column: 1 / -1; color: red;'>Failed to load files.</p>";
+      filesGrid.innerHTML = `<p style="grid-column:1/-1; color:var(--danger);">Failed to load files.</p>`;
       return;
     }
 
     if (!data.files || data.files.length === 0) {
-      filesGrid.innerHTML =
-        "<p style='grid-column: 1 / -1; text-align: center; color: var(--soft-charcoal);'>No PDFs uploaded yet. Start by uploading a document above!</p>";
+      filesGrid.innerHTML = `
+        <p style="grid-column:1/-1; text-align:center; color:var(--ink-very-light); font-style:italic; font-family:'Lora',serif;">
+          No PDFs uploaded yet. Start by uploading a document above.
+        </p>`;
       return;
     }
 
@@ -171,37 +200,35 @@ async function fetchUserFiles() {
       const fileName =
         file.filename || file.file_name || file.name || "Document";
       const fileId = file.file_id || file.id || "unknown";
+      const uploaded = file.assigned_at
+        ? new Date(file.assigned_at).toLocaleDateString()
+        : "—";
 
       const cardHtml = `
-        <div class="card" style="background-color: var(--soft-lime);">
-          <h3 style="word-break: break-word;">${fileName}</h3>
-          <p style="opacity: 0.7; font-size: 0.85rem;">Uploaded: ${
-            file.assigned_at
-              ? new Date(file.assigned_at).toLocaleDateString()
-              : "—"
-          }</p>
-          <div class="actions" style="margin-top: 20px; display: flex; flex-direction: column; gap: 10px;">
+        <div class="file-card">
+          <div class="file-card-title">${fileName}</div>
+          <div class="file-card-meta">Uploaded: ${uploaded}</div>
+          <div class="file-card-actions">
             <button
-              class="cta-button"
-              onclick="generateQuestions('${fileId}', this)"
-              style="background-color: var(--periwinkle); border: none; cursor: pointer; padding: 10px 20px; font-size: 0.9rem;">
-              Generate Questions
+              class="btn btn-outline btn-sm"
+              onclick="generateQuestions('${fileId}', this)">
+              ${icon("sparkles")} Generate Questions
             </button>
             <a
               href="/interview"
-              class="cta-button"
-              style="background-color: var(--sky-blue); padding: 10px 20px; font-size: 0.9rem; text-align: center;">
-              Start Interview
+              class="btn btn-primary btn-sm"
+              style="justify-content:center; text-align:center;">
+              ${icon("play")} Start Interview
             </a>
           </div>
         </div>
       `;
+
       filesGrid.innerHTML += cardHtml;
     });
   } catch (error) {
     console.error("Error fetching files:", error);
-    filesGrid.innerHTML =
-      "<p style='grid-column: 1 / -1; color: red;'>Failed to load your files.</p>";
+    filesGrid.innerHTML = `<p style="grid-column:1/-1; color:var(--danger);">Failed to load your files.</p>`;
   }
 }
 
@@ -220,12 +247,20 @@ if (uploadBtn && fileInput) {
     const userId = localStorage.getItem("qp_user_id");
 
     if (!file) {
-      alert("Please select a PDF file first.");
+      notify(
+        "No file selected",
+        "Please select a PDF file before uploading.",
+        "info",
+      );
       return;
     }
 
     if (!userId) {
-      alert("You must be logged in to upload files.");
+      notify(
+        "Not logged in",
+        "You must be logged in to upload files.",
+        "error",
+      );
       window.location.href = "/login";
       return;
     }
@@ -233,8 +268,8 @@ if (uploadBtn && fileInput) {
     const formData = new FormData();
     formData.append("file", file);
 
-    const originalText = uploadBtn.innerText;
-    uploadBtn.innerText = "Uploading…";
+    const originalHTML = uploadBtn.innerHTML;
+    uploadBtn.innerHTML = `${icon("sparkles")} Uploading…`;
     uploadBtn.disabled = true;
 
     try {
@@ -250,35 +285,40 @@ if (uploadBtn && fileInput) {
 
       if (response.ok) {
         fileInput.value = "";
-        alert(
-          "File uploaded! Ingestion is running in the background.\n\n" +
-            'Once it appears in your file list below, click "Generate Questions" to create interview questions (this may take a few minutes).',
+        notify(
+          "Upload successful",
+          'Your file is being ingested in the background.\n\nOnce it appears in your file list, click "Generate Questions" to create interview questions — this may take a few minutes.',
+          "success",
         );
-        // Poll the file list until the new file appears (up to 90 seconds)
         pollForNewFile();
       } else {
-        alert(`Upload failed: ${data.detail}`);
+        notify("Upload failed", data.detail, "error");
       }
     } catch (error) {
       console.error("Error uploading file:", error);
-      alert("A network error occurred during upload.");
+      notify(
+        "Network error",
+        "A network error occurred during upload.",
+        "error",
+      );
     } finally {
-      uploadBtn.innerText = originalText;
+      uploadBtn.innerHTML = originalHTML;
       uploadBtn.disabled = false;
     }
   });
 }
 
-/**
- * Poll /api/files every 5 seconds after an upload until the file
- * count increases, then refresh the grid. Stops after 18 attempts (~90s).
- */
+// ==========================================
+// 5. POLL FOR NEW FILE AFTER UPLOAD
+// ==========================================
+
 async function pollForNewFile() {
   const userId = localStorage.getItem("qp_user_id");
   if (!userId) return;
 
-  // Capture current file count
-  let previousCount = document.querySelectorAll("#files-grid .card").length;
+  let previousCount = document.querySelectorAll(
+    "#files-grid .file-card",
+  ).length;
   let attempts = 0;
   const maxAttempts = 18;
 

@@ -3,134 +3,248 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>My Profile - QuestionPrep</title>
+        <title>Dashboard — QuestionPrep</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link
-            href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap"
+            href="https://fonts.googleapis.com/css2?family=Cormorant:ital,wght@0,300;0,400;1,300;1,400&family=Inter:wght@400;500;600&family=Lora:ital,wght@0,400;0,500;1,400;1,500&display=swap"
             rel="stylesheet"
         />
         <link rel="stylesheet" href="/static/css/styles.css" />
     </head>
     <body>
-        <section style="background-color: var(--lavender); padding: 40px 0">
-            <div class="container text-center">
-                <h1 style="margin-bottom: 0">My Dashboard</h1>
-            </div>
-        </section>
-
-        <section style="padding: 60px 0">
+        <!-- ── Navigation ── -->
+        <nav class="site-nav">
             <div class="container">
+                <a href="/" class="nav-brand">QuestionPrep</a>
+                <div class="nav-links">
+                    <span
+                        style="
+                            font-size: 0.88rem;
+                            color: var(--ink-very-light);
+                            font-style: italic;
+                            font-family: &quot;Lora&quot;, serif;
+                        "
+                        >My Dashboard</span
+                    >
+                    <button
+                        class="btn btn-ghost btn-sm"
+                        onclick="window.location.href='/login'"
+                    >
+                        <i data-lucide="log-out"></i> Sign out
+                    </button>
+                </div>
+            </div>
+        </nav>
+
+        <!-- ── Page Hero ── -->
+        <div class="page-hero">
+            <div class="container">
+                <h1>My Dashboard</h1>
+                <p class="page-subtitle">
+                    Your documents, sessions, and progress — all in one place.
+                </p>
+            </div>
+        </div>
+
+        <!-- ── Main Content ── -->
+        <section class="page-section">
+            <div class="container">
+                <!-- Tabs -->
                 <div class="tabs">
                     <button
                         class="tab-btn active"
-                        onclick="switchTab('profile')"
+                        onclick="switchTab('profile', this)"
                     >
-                        Profile Info
+                        <i data-lucide="user"></i> Profile
                     </button>
-                    <button class="tab-btn" onclick="switchTab('files')">
-                        My Files
+                    <button class="tab-btn" onclick="switchTab('files', this)">
+                        <i data-lucide="folder-open"></i> My Files
                     </button>
                 </div>
 
-                <div id="profile" class="tab-content active text-center">
-                    <div
-                        class="card"
-                        style="
-                            max-width: 500px;
-                            margin: 0 auto;
-                            background-color: var(--white);
-                            border: 1px solid var(--pink-mist);
-                        "
-                    >
+                <!-- ── Profile Tab ── -->
+                <div id="profile" class="tab-content active">
+                    <div class="card" style="max-width: 480px">
+                        <div class="card-header">Student Profile</div>
+
                         <div
-                            class="icon"
-                            style="background-color: var(--peach-pastel)"
-                        ></div>
-                        <h2 style="margin-bottom: 10px">Student Profile</h2>
-                        <p style="margin-bottom: 30px">Ready to practice?</p>
-                        <button
-                            class="cta-button"
                             style="
-                                background-color: var(--soft-charcoal);
-                                border: none;
-                                cursor: pointer;
+                                display: flex;
+                                align-items: center;
+                                gap: 1.2rem;
+                                margin-bottom: 1.5rem;
                             "
                         >
-                            Edit Profile
-                        </button>
-                    </div>
-                </div>
-
-                <div id="files" class="tab-content">
-                    <div
-                        style="
-                            text-align: right;
-                            margin-bottom: 30px;
-                            display: flex;
-                            justify-content: flex-end;
-                            gap: 10px;
-                            align-items: center;
-                        "
-                    >
-                        <input
-                            type="file"
-                            id="pdf-upload"
-                            accept=".pdf"
-                            style="
-                                padding: 10px;
-                                border: 1px solid var(--lavender);
-                                border-radius: 10px;
-                                font-family: &quot;Inter&quot;, sans-serif;
-                            "
-                        />
-                        <button
-                            id="upload-btn"
-                            class="cta-button"
-                            style="border: none; cursor: pointer"
-                        >
-                            Upload PDF
-                        </button>
-                    </div>
-
-                    <div class="grid" id="files-grid">
-                        <div
-                            class="card"
-                            style="background-color: var(--soft-lime)"
-                        >
-                            <h3>System Design.pdf</h3>
-                            <p>Status: Ready</p>
-                            <div class="actions" style="margin-top: 20px">
-                                <a
-                                    href="/interview"
-                                    class="cta-button"
+                            <div
+                                style="
+                                    width: 52px;
+                                    height: 52px;
+                                    border-radius: 50%;
+                                    background: rgba(201, 127, 62, 0.12);
+                                    border: 1px solid var(--border);
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: center;
+                                    color: var(--warm);
+                                "
+                            >
+                                <i data-lucide="user" class="icon-xl"></i>
+                            </div>
+                            <div>
+                                <div
                                     style="
-                                        background-color: var(--periwinkle);
-                                        padding: 10px 20px;
-                                        font-size: 0.95rem;
+                                        font-family:
+                                            &quot;Lora&quot;, Georgia, serif;
+                                        font-size: 1.05rem;
+                                        color: var(--ink);
                                     "
-                                    >Start Interview Session</a
                                 >
+                                    Student
+                                </div>
+                                <div
+                                    style="
+                                        font-size: 0.82rem;
+                                        color: var(--ink-very-light);
+                                        font-style: italic;
+                                        font-family: &quot;Lora&quot;, serif;
+                                    "
+                                >
+                                    Ready to practice
+                                </div>
                             </div>
                         </div>
 
+                        <div class="alert alert-info">
+                            <i data-lucide="info"></i>
+                            <span
+                                >Upload a PDF in <strong>My Files</strong>,
+                                generate questions, then start an interview
+                                session.</span
+                            >
+                        </div>
+
                         <div
-                            class="card"
-                            style="background-color: var(--pink-mist)"
+                            style="
+                                margin-top: 1.5rem;
+                                display: flex;
+                                gap: 0.75rem;
+                            "
                         >
-                            <h3>Data Structures.pdf</h3>
-                            <p>Status: Indexing in background...</p>
-                            <div class="actions" style="margin-top: 20px">
-                                <button
-                                    class="cta-button"
-                                    disabled
+                            <button class="btn btn-outline btn-sm">
+                                <i data-lucide="pencil"></i> Edit Profile
+                            </button>
+                            <a href="/interview" class="btn btn-primary btn-sm">
+                                <i data-lucide="play"></i> Start Interview
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── Files Tab ── -->
+                <div id="files" class="tab-content">
+                    <!-- Upload row -->
+                    <div class="card" style="margin-bottom: 2rem">
+                        <div class="card-header">Upload a document</div>
+                        <p style="margin-bottom: 1.2rem; font-size: 0.9rem">
+                            Upload a PDF (study notes, research papers and
+                            textbooks) and QuestionPrep will generate tailored
+                            interview questions from it. Please make sure to not
+                            upload anything heavy as the current system is not
+                            capable of supporting it.
+                        </p>
+                        <div
+                            style="
+                                display: flex;
+                                gap: 0.75rem;
+                                align-items: center;
+                                flex-wrap: wrap;
+                            "
+                        >
+                            <label
+                                style="
+                                    display: flex;
+                                    align-items: center;
+                                    gap: 0.6rem;
+                                    cursor: pointer;
+                                    flex: 1;
+                                    min-width: 200px;
+                                "
+                            >
+                                <i
+                                    data-lucide="file-text"
+                                    style="color: var(--warm); flex-shrink: 0"
+                                ></i>
+                                <input
+                                    type="file"
+                                    id="pdf-upload"
+                                    accept=".pdf"
                                     style="
-                                        background-color: #ccc;
+                                        font-size: 0.88rem;
                                         border: none;
-                                        padding: 10px 20px;
-                                        font-size: 0.95rem;
-                                        cursor: not-allowed;
+                                        background: transparent;
+                                        padding: 0;
+                                        margin: 0;
+                                        width: 100%;
+                                        cursor: pointer;
                                     "
+                                />
+                            </label>
+                            <button
+                                id="upload-btn"
+                                class="btn btn-primary btn-sm"
+                            >
+                                <i data-lucide="upload"></i> Upload PDF
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Files grid -->
+                    <div class="grid" id="files-grid">
+                        <!-- Populated by app.js — static placeholders shown before JS runs -->
+                        <div class="file-card">
+                            <div class="file-card-title">System Design.pdf</div>
+                            <div class="file-card-meta">Status: Ready</div>
+                            <div class="file-card-actions">
+                                <a
+                                    href="/interview"
+                                    class="btn btn-primary btn-sm"
                                 >
-                                    Processing
+                                    <i data-lucide="play"></i> Start Interview
+                                    Session
+                                </a>
+                            </div>
+                        </div>
+
+                        <div class="file-card">
+                            <div class="file-card-title">
+                                Data Structures.pdf
+                            </div>
+                            <div
+                                class="file-card-meta"
+                                style="
+                                    display: flex;
+                                    align-items: center;
+                                    gap: 0.4rem;
+                                "
+                            >
+                                <i
+                                    data-lucide="loader"
+                                    style="
+                                        width: 13px;
+                                        height: 13px;
+                                        color: var(--warning);
+                                    "
+                                ></i>
+                                Indexing in background…
+                            </div>
+                            <div class="file-card-actions">
+                                <button
+                                    class="btn btn-outline btn-sm"
+                                    disabled
+                                    style="opacity: 0.5; cursor: not-allowed"
+                                >
+                                    <i data-lucide="clock"></i> Processing
                                 </button>
                             </div>
                         </div>
@@ -140,22 +254,23 @@
         </section>
 
         <script>
-            function switchTab(tabId) {
-                // Hide all tab contents
+            function switchTab(tabId, btn) {
                 document
                     .querySelectorAll(".tab-content")
                     .forEach((c) => c.classList.remove("active"));
-                // Remove active state from all buttons
                 document
                     .querySelectorAll(".tab-btn")
                     .forEach((b) => b.classList.remove("active"));
-
-                // Show the target tab and highlight the clicked button
                 document.getElementById(tabId).classList.add("active");
-                event.currentTarget.classList.add("active");
+                btn.classList.add("active");
+                lucide.createIcons();
             }
         </script>
 
+        <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
         <script src="/static/js/app.js"></script>
+        <script>
+            lucide.createIcons();
+        </script>
     </body>
 </html>
