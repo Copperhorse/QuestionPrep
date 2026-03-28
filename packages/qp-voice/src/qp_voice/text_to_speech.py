@@ -17,8 +17,22 @@ class TextToSpeech:
         self.voice_state = self.model.get_state_for_audio_prompt(voice_name)
         print(f"Model loaded with voice: {voice_name}")
 
+        # 3. OPT: Cache generated WAV bytes by text so repeated questions
+        #    (e.g. a question asked twice across reloads) are served instantly
+        #    without re-running the TTS model.  Keys are the raw text strings;
+        #    values are the raw bytes of the WAV file.
+        self._cache: dict[str, bytes] = {}
+
     def generate_wav_bytes(self, text: str) -> io.BytesIO:
-        """Generates audio and returns it as a byte stream (no disk writing)."""
+        """Generates audio and returns it as a byte stream (no disk writing).
+
+        Results are memoised: identical text strings are returned from an
+        in-memory cache on subsequent calls, skipping model inference entirely.
+        """
+        # FIX OPT: serve from cache when available
+        if text in self._cache:
+            return io.BytesIO(self._cache[text])
+
         # Generate audio (returns a 1D torch tensor)
         audio_tensor = self.model.generate_audio(self.voice_state, text)
 
@@ -28,6 +42,10 @@ class TextToSpeech:
         # Create an in-memory file
         byte_io = io.BytesIO()
         scipy.io.wavfile.write(byte_io, self.sample_rate, audio_data)
-        byte_io.seek(0)
 
+        # Store the raw bytes in the cache before seeking so both paths
+        # (cached and uncached) return a freshly-seeked BytesIO object.
+        self._cache[text] = byte_io.getvalue()
+
+        byte_io.seek(0)
         return byte_io

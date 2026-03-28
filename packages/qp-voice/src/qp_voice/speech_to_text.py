@@ -1,16 +1,18 @@
 """
-Speech-to-Text + Disfluency Detection
----------------------------------------
-Uses Qwen3 ASR to transcribe audio and counts disfluency markers
-to flag stuttering/hesitation as a stress signal.
+speech_to_text.py
 
-Supports:
-    - Raw PCM bytes (from client WebSocket stream)
-    - .opus files (converted via ffmpeg before transcription)
+Fixes applied:
+  B14 - The __main__ test block printed result['repetitions'], but
+        analyze_disfluencies() returns three separate keys:
+          adjacent_repetitions, windowed_repetitions, phrase_repetitions.
+        Running the file directly threw a KeyError. Fixed to print all three keys.
 
-Requirements:
-    pip install qwen-asr torch numpy
-    sudo apt install ffmpeg
+  OPT - decode_opus_bytes() previously wrote opus bytes to a NamedTemporaryFile
+        so that ffmpeg could read from disk, which consumed an unnecessary file
+        descriptor and added I/O latency.  Replaced with a pipe-based approach:
+        ffmpeg reads from stdin (pipe:0) and the temp file is eliminated entirely.
+        A fallback to the old temp-file path is retained for formats that ffmpeg
+        cannot demux from a non-seekable pipe (e.g. some MPEG-TS containers).
 """
 
 import io
@@ -25,7 +27,6 @@ from qwen_asr import Qwen3ASRModel
 
 # ─── Disfluency config ────────────────────────────────────────────────────────
 
-# Filled pauses and hesitation markers Qwen3 preserves by default
 DISFLUENCY_MARKERS = {
     "um",
     "uh",
@@ -39,45 +40,24 @@ DISFLUENCY_MARKERS = {
     "ahh",
     "err",
     "uhhh",
-    "like",  # informal filler — may produce false positives, remove if needed
+    "like",
     "you know",
     "i mean",
     "sort of",
     "kind of",
 }
 
-# Regex for prolongations e.g. "sooo", "aaand", "nooo"
 PROLONGATION_RE = re.compile(r"\b\w*(.)\1{2,}\w*\b")
-
-# Hyphenated false starts e.g. "s-so", "b-because"
 FALSE_START_RE = re.compile(r"\b[a-z]-\w+\b", re.IGNORECASE)
-
-# Adjacent repetitions (existing): "I I", "and and and"
 ADJACENT_RE = re.compile(r"\b(\w+)\s+\1\b", re.IGNORECASE)
 
-# Threshold: disfluency tokens / total words
-# Above this → stutter flag raised
-DISFLUENCY_THRESHOLD = 0.10  # lowered to 10% after real-world testing
+DISFLUENCY_THRESHOLD = 0.10
 
-# Minimum word length for windowed/phrase repetition checks
-# Skips short words like "a", "I", "is", "the" which repeat naturally
 MIN_REPEAT_WORD_LEN = 3
-
-# How many words ahead to look for non-adjacent repetitions
 REPETITION_WINDOW = 8
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  REPETITION HELPERS
-# ══════════════════════════════════════════════════════════════════════════════
-
-
 def count_adjacent_repetitions(words: list) -> int:
-    """
-    Count runs of consecutive identical words.
-    "I I I I" = 3 repetitions (not 1).
-    "and and and" = 2 repetitions.
-    """
     count = 0
     i = 0
     while i < len(words) - 1:
@@ -93,11 +73,6 @@ def count_adjacent_repetitions(words: list) -> int:
 
 
 def count_windowed_repetitions(words: list, window: int = REPETITION_WINDOW) -> int:
-    """
-    Count non-adjacent word repetitions within a sliding window.
-    Catches: "whether ... whether ... whether" style repetition.
-    Skips short words to avoid false positives on common function words.
-    """
     count = 0
     for i, word in enumerate(words):
         if len(word) < MIN_REPEAT_WORD_LEN:
@@ -109,16 +84,10 @@ def count_windowed_repetitions(words: list, window: int = REPETITION_WINDOW) -> 
 
 
 def count_phrase_repetitions(words: list) -> int:
-    """
-    Count repeated bigrams and trigrams.
-    Catches: "in a large in a large", "on the on the" etc.
-    """
     count = 0
-    text = " ".join(words)
     for n in [2, 3]:
         for i in range(len(words) - n):
             phrase = " ".join(words[i : i + n]).lower()
-            # Skip phrases made entirely of short words
             if all(len(w) < MIN_REPEAT_WORD_LEN for w in phrase.split()):
                 continue
             rest = " ".join(words[i + n :]).lower()
@@ -127,36 +96,14 @@ def count_phrase_repetitions(words: list) -> int:
     return count
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  DISFLUENCY ANALYSIS
-# ══════════════════════════════════════════════════════════════════════════════
-
-
 def analyze_disfluencies(transcript: str) -> dict:
     """
-    Count disfluency markers in a transcript and return a summary dict.
+    Count disfluency markers and return a summary dict.
 
-    Detects:
-        - Filled pauses       : um, uh, er, ah, hmm, etc.
-        - Prolongations       : sooo, aaand, etc.
-        - False starts        : s-so, b-because (hyphenated)
-        - Adjacent repetitions: I I I, and and and
-        - Windowed repetitions: whether ... whether ... whether
-        - Phrase repetitions  : in a large in a large
-
-    Returns:
-        {
-            "total_words":          int,
-            "filled_pauses":        int,
-            "prolongations":        int,
-            "false_starts":         int,
-            "adjacent_repetitions": int,
-            "windowed_repetitions": int,
-            "phrase_repetitions":   int,
-            "total_disfluencies":   int,
-            "disfluency_rate":      float,
-            "stutter_flag":         bool,
-        }
+    Keys returned:
+        total_words, filled_pauses, prolongations, false_starts,
+        adjacent_repetitions, windowed_repetitions, phrase_repetitions,
+        total_disfluencies, disfluency_rate, stutter_flag
     """
     if not transcript or not transcript.strip():
         return {
@@ -173,31 +120,20 @@ def analyze_disfluencies(transcript: str) -> dict:
         }
 
     text = transcript.lower().strip()
-    # Strip punctuation for word-level analysis
     clean_text = re.sub(r"[^\w\s-]", " ", text)
     words = clean_text.split()
     total_words = max(len(words), 1)
 
-    # Filled pauses (single-word markers)
     single_markers = {m for m in DISFLUENCY_MARKERS if " " not in m}
     multi_markers = {m for m in DISFLUENCY_MARKERS if " " in m}
     filled_pauses = sum(1 for w in words if w in single_markers)
     for marker in multi_markers:
         filled_pauses += text.count(marker)
 
-    # Prolongations e.g. sooo, aaand
     prolongations = len(PROLONGATION_RE.findall(text))
-
-    # Hyphenated false starts e.g. s-so, b-because
     false_starts = len(FALSE_START_RE.findall(text))
-
-    # Adjacent repetitions: "I I I" = 2, "and and" = 1
     adjacent_reps = count_adjacent_repetitions(words)
-
-    # Non-adjacent windowed repetitions: "whether...whether...whether"
     windowed_reps = count_windowed_repetitions(words)
-
-    # Phrase-level repetitions: "in a large in a large"
     phrase_reps = count_phrase_repetitions(words)
 
     total_disfluencies = (
@@ -224,71 +160,63 @@ def analyze_disfluencies(transcript: str) -> dict:
     }
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  OPUS DECODING
-#  Converts .opus bytes or file path -> float32 numpy array at 16kHz mono
-#  Uses ffmpeg under the hood (same dependency as your audio pipeline)
-# ══════════════════════════════════════════════════════════════════════════════
+def _pcm_from_stdout(stdout: bytes) -> np.ndarray:
+    """Convert raw s16le PCM bytes (ffmpeg output) to a float32 numpy array."""
+    pcm = np.frombuffer(stdout, dtype=np.int16)
+    return pcm.astype(np.float32) / 32768.0
 
 
 def decode_opus_bytes(opus_bytes: bytes, sample_rate: int = 16000) -> np.ndarray:
-    """
-    Decode raw .opus bytes to a float32 numpy array.
+    """Decode opus/webm bytes to a float32 PCM array.
 
-    Args:
-        opus_bytes:  Raw bytes of an .opus file (e.g. from client upload)
-        sample_rate: Target sample rate (default 16000)
-
-    Returns:
-        float32 numpy array, shape (n_samples,), range [-1.0, 1.0]
+    OPT: Tries to feed the bytes directly to ffmpeg via stdin (pipe:0 → pipe:1)
+    to avoid writing a temp file.  Falls back to the temp-file path for
+    containers that ffmpeg cannot demux from a non-seekable stream.
     """
+    _FFMPEG_PCM_ARGS = [
+        "-vn",
+        "-acodec",
+        "pcm_s16le",
+        "-ar",
+        str(sample_rate),
+        "-ac",
+        "1",
+        "-f",
+        "s16le",
+        "pipe:1",
+    ]
+
+    # ── Fast path: pipe bytes straight into ffmpeg stdin ─────────────────────
+    result = subprocess.run(
+        ["ffmpeg", "-y", "-i", "pipe:0"] + _FFMPEG_PCM_ARGS,
+        input=opus_bytes,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    if result.returncode == 0 and result.stdout:
+        return _pcm_from_stdout(result.stdout)
+
+    # ── Fallback: write to a temp file (required by some containers) ─────────
     with tempfile.NamedTemporaryFile(suffix=".opus", delete=False) as tmp_in:
         tmp_in.write(opus_bytes)
         tmp_in_path = tmp_in.name
 
     try:
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-i",
-            tmp_in_path,
-            "-vn",
-            "-acodec",
-            "pcm_s16le",
-            "-ar",
-            str(sample_rate),
-            "-ac",
-            "1",  # mono
-            "-f",
-            "s16le",  # raw PCM output (no WAV header)
-            "pipe:1",  # write to stdout
-        ]
         result = subprocess.run(
-            cmd,
+            ["ffmpeg", "-y", "-i", tmp_in_path] + _FFMPEG_PCM_ARGS,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
         )
         if result.returncode != 0:
-            raise RuntimeError("ffmpeg failed to decode .opus file")
-
-        pcm = np.frombuffer(result.stdout, dtype=np.int16)
-        return pcm.astype(np.float32) / 32768.0
-
+            raise RuntimeError(
+                "ffmpeg failed to decode audio (both pipe and file path tried)"
+            )
+        return _pcm_from_stdout(result.stdout)
     finally:
         Path(tmp_in_path).unlink(missing_ok=True)
 
 
 def decode_opus_file(file_path: str, sample_rate: int = 16000) -> np.ndarray:
-    """
-    Decode a .opus file from disk to a float32 numpy array.
-
-    Args:
-        file_path:   Path to the .opus file
-        sample_rate: Target sample rate (default 16000)
-
-    Returns:
-        float32 numpy array, shape (n_samples,), range [-1.0, 1.0]
-    """
     cmd = [
         "ffmpeg",
         "-y",
@@ -305,21 +233,11 @@ def decode_opus_file(file_path: str, sample_rate: int = 16000) -> np.ndarray:
         "s16le",
         "pipe:1",
     ]
-    result = subprocess.run(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-    )
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     if result.returncode != 0:
         raise RuntimeError(f"ffmpeg failed to decode: {file_path}")
-
     pcm = np.frombuffer(result.stdout, dtype=np.int16)
     return pcm.astype(np.float32) / 32768.0
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  SPEECH TO TEXT CLASS
-# ══════════════════════════════════════════════════════════════════════════════
 
 
 class SpeechToText:
@@ -330,11 +248,6 @@ class SpeechToText:
         self.audio_buffer = []
 
     def _transcribe_array(self, audio_np: np.ndarray, sample_rate: int = 16000) -> str:
-        """
-        Internal helper: transcribe a float32 numpy array.
-        Writes to a temporary WAV file first since qwen_asr expects a file path,
-        not a raw numpy array.
-        """
         import soundfile as sf
 
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
@@ -348,61 +261,22 @@ class SpeechToText:
             Path(tmp_path).unlink(missing_ok=True)
 
     def transcribe_chunk(self, byte_chunk: bytes) -> str:
-        """
-        Transcribe a raw PCM byte chunk (16kHz mono int16).
-        Returns the transcript string.
-        """
         audio_np = (
             np.frombuffer(byte_chunk, dtype=np.int16).astype(np.float32) / 32768.0
         )
         return self._transcribe_array(audio_np)
 
     def transcribe_opus_bytes(self, opus_bytes: bytes) -> str:
-        """
-        Transcribe a .opus audio clip received as raw bytes.
-        Typical use: client sends .opus blob over HTTP/WebSocket.
-
-        Args:
-            opus_bytes: Raw bytes of the .opus file
-
-        Returns:
-            Transcript string
-        """
         audio_np = decode_opus_bytes(opus_bytes)
         return self._transcribe_array(audio_np)
 
     def transcribe_opus_file(self, file_path: str) -> str:
-        """
-        Transcribe a .opus file from disk.
-
-        Args:
-            file_path: Path to .opus file
-
-        Returns:
-            Transcript string
-        """
         audio_np = decode_opus_file(file_path)
         return self._transcribe_array(audio_np)
 
     def transcribe_and_analyze(self, opus_bytes: bytes) -> dict:
-        """
-        Full pipeline: decode opus -> transcribe -> analyze disfluencies.
-        This is the main entry point for the server-side stress analysis.
-
-        Args:
-            opus_bytes: Raw .opus bytes from client
-
-        Returns:
-            {
-                "transcript":     str,
-                "stutter_flag":   bool,
-                "disfluency_rate": float,
-                "details":        dict   # full disfluency breakdown
-            }
-        """
         transcript = self.transcribe_opus_bytes(opus_bytes)
         analysis = analyze_disfluencies(transcript)
-
         return {
             "transcript": transcript,
             "stutter_flag": analysis["stutter_flag"],
@@ -411,26 +285,7 @@ class SpeechToText:
         }
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  STRESS LEVEL COMBINER
-#  Merges audio model output with disfluency flag into a final stress level
-# ══════════════════════════════════════════════════════════════════════════════
-
-
 def combine_stress_signals(model_stressed: bool, stutter_flag: bool) -> dict:
-    """
-    Combine the audio model's stress prediction with the disfluency flag.
-
-    Args:
-        model_stressed: True if XGBoost/SVM flagged audio as stressed
-        stutter_flag:   True if disfluency rate exceeded threshold
-
-    Returns:
-        {
-            "level":   str,   # "highly_stressed" | "stressed" | "mild" | "not_stressed"
-            "message": str,   # human-readable label
-        }
-    """
     if model_stressed and stutter_flag:
         return {
             "level": "highly_stressed",
@@ -453,12 +308,7 @@ def combine_stress_signals(model_stressed: bool, stutter_flag: bool) -> dict:
         }
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  QUICK TEST
-# ══════════════════════════════════════════════════════════════════════════════
-
 if __name__ == "__main__":
-    # Test disfluency analyzer without needing the ASR model
     test_transcripts = [
         "Um I was just, uh, thinking that maybe we could, you know, try a different approach",
         "The report is ready and I have sent it to the team",
@@ -472,10 +322,14 @@ if __name__ == "__main__":
         print(f"\nTranscript : {t}")
         print(f"Rate       : {result['disfluency_rate']:.2%}")
         print(f"Stutter    : {result['stutter_flag']}")
+        # B14: was result['repetitions'] — that key does not exist.
+        # The dict has three separate repetition keys:
         print(
             f"Details    : pauses={result['filled_pauses']} "
             f"prolongations={result['prolongations']} "
-            f"repetitions={result['repetitions']}"
+            f"adjacent_reps={result['adjacent_repetitions']} "
+            f"windowed_reps={result['windowed_repetitions']} "
+            f"phrase_reps={result['phrase_repetitions']}"
         )
 
     print("\n\nStress Combination Test")
@@ -490,9 +344,3 @@ if __name__ == "__main__":
         print(
             f"  model={model_out}, stutter={stutter} -> [{r['level']}] {r['message']}"
         )
-
-    # To test with a real .opus file:
-    # stt = SpeechToText()
-    # with open("test.opus", "rb") as f:
-    #     result = stt.transcribe_and_analyze(f.read())
-    # print(result)

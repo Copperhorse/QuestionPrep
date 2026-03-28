@@ -1,24 +1,39 @@
 """
 main.py — QuestionPrep FastAPI Backend (Orchestrator)
-Handles API routes, AI background tasks, and HTML template rendering.
 
-The LLM server (llama-server) is managed here — no need to run enrichment.sh manually.
-On the first "Generate Questions" click it starts the server, waits for it to load,
-runs enrichment + indexing, then leaves the server running for subsequent requests.
-On app shutdown the server is killed, mirroring enrichment.sh step 6.
+Fixes applied:
+  OPT  - Removed dead `analyze_disfluencies` import.  The function is only ever
+         called inside SpeechToText.transcribe_and_analyze(); importing it here
+         at the top level added an unused name to the module namespace.
+
+  RACE - end_session() nulled _stt without holding _stt_lock.  If a thread pool
+         worker had already passed the outer `if _stt is None` guard in get_stt()
+         (seeing a loaded model) and end_session then set _stt = None from the
+         async event loop, a second concurrent request could trigger a redundant
+         model re-load — or worse, the worker could use a partially torn-down
+         object.  Fixed by acquiring _stt_lock inside end_session before
+         assigning None, matching the double-checked locking pattern used by
+         get_stt() itself.
 """
 
+import asyncio
 import logging
+import os
 import subprocess
+import threading
 import time
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Set
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+
+# At top of main.py, with other fastapi imports:
+from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import Response as PlainResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -34,7 +49,16 @@ from qp_pipeline.Enricher import EnrichmentManager
 from qp_pipeline.game_loop import InterviewSession
 from qp_pipeline.ingester import ingest
 from qp_pipeline.MarkdownChunker import ChunkConfig, MarkdownChunker
-from qp_voice.speech_to_text import SpeechToText, analyze_disfluencies
+
+# OPT: Removed `analyze_disfluencies` — it was imported but never called directly
+# in this file.  All disfluency analysis goes through SpeechToText.transcribe_and_analyze().
+from qp_voice.speech_to_text import SpeechToText
+from qp_voice.text_to_speech import TextToSpeech  # B02: was never imported
+
+# B25: Rate limiting
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 # ---------------- LOGGING SETUP ----------------
 logging.basicConfig(level=logging.INFO)
@@ -49,55 +73,138 @@ DB_PATH = DATA_DIR / "rag_staging.db"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # ---------------- LLAMA SERVER CONFIG ----------------
-# Mirrors enrichment.sh exactly — update these if paths change on the USB stick.
-LLAMA_BIN = Path("/media/copper/USB_STICK/Git/llama.cpp/build/bin/llama-server")
-LLAMA_MODEL = Path("/media/copper/USB_STICK/Models/LFM2.5-1.2B-Instruct-Q8_0.gguf")
-LLAMA_HOST = "localhost"
-LLAMA_PORT = 8080
+# B15: Read paths from environment variables so the app is not locked to one machine.
+# Set LLAMA_BIN and LLAMA_MODEL in your shell or a .env file.
+_DEFAULT_LLAMA_BIN = "/media/copper/USB_STICK/Git/llama.cpp/build/bin/llama-server"
+_DEFAULT_LLAMA_MODEL = "/media/copper/USB_STICK/Models/LFM2.5-1.2B-Instruct-Q8_0.gguf"
+
+LLAMA_BIN = Path(os.environ.get("LLAMA_BIN", _DEFAULT_LLAMA_BIN))
+LLAMA_MODEL = Path(os.environ.get("LLAMA_MODEL", _DEFAULT_LLAMA_MODEL))
+LLAMA_HOST = os.environ.get("LLAMA_HOST", "localhost")
+LLAMA_PORT = int(os.environ.get("LLAMA_PORT", "8080"))
 LLAMA_HEALTH_URL = f"http://{LLAMA_HOST}:{LLAMA_PORT}/v1/models"
 LLAMA_LOG = DATA_DIR / "server_log.txt"
 
-# enrichment.sh uses 60 × 3 s = 3 min. Match that.
 HEALTH_RETRIES = 60
 HEALTH_INTERVAL = 3  # seconds
 
-# ---------------- APP & TEMPLATES ----------------
-app = FastAPI(title="QuestionPrep API")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
-templates = Jinja2Templates(directory=BASE_DIR / "templates")
+# ---------------- SESSION CONFIG ----------------
+# B22: Sessions inactive longer than this are automatically pruned.
+SESSION_TTL_SECONDS = 1800  # 30 minutes
 
 # ---------------- GLOBAL STATE ----------------
 db = DBManager(db_path=str(DB_PATH))
 active_sessions: Dict[str, InterviewSession] = {}
+_session_last_active: Dict[str, float] = {}  # B22: tracks last activity per session
+
 _stt: Optional[SpeechToText] = None
+_tts: Optional[TextToSpeech] = None  # B02: TTS singleton
 _llm_process: Optional[subprocess.Popen] = None
+
+_tts_lock = threading.Lock()
+_stt_lock = threading.Lock()
+# ── SSE BROADCASTER ──────────────────────────────────────────────────────────
+# One asyncio.Queue per connected browser tab.  broadcast() is the async
+# version; emit() is the thread-safe shim used by background tasks.
+_sse_clients: Set[asyncio.Queue] = set()
+_active_enrichments: int = 0
+_enrichment_lock = threading.Lock()
+_main_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+async def broadcast(message: str) -> None:
+    """Push *message* to every connected SSE client. Must be called from async context."""
+    dead = set()
+    for q in list(_sse_clients):
+        try:
+            q.put_nowait(message)
+        except asyncio.QueueFull:
+            dead.add(q)
+    _sse_clients.difference_update(dead)
+
+
+def emit(message: str) -> None:
+    """
+    Thread-safe broadcast — safe to call from synchronous background threads
+    (ingestion, enrichment).  Schedules broadcast() onto the main event loop.
+    Falls back to logger.info() if the loop isn't running yet.
+    """
+    if _main_loop and _main_loop.is_running():
+        asyncio.run_coroutine_threadsafe(broadcast(message), _main_loop)
+    else:
+        logger.info(f"[emit-fallback] {message}")
+
+
+def _inc_enrichments() -> None:
+    global _active_enrichments
+    with _enrichment_lock:
+        _active_enrichments += 1
+
+
+def _dec_enrichments() -> None:
+    global _active_enrichments
+    with _enrichment_lock:
+        _active_enrichments = max(0, _active_enrichments - 1)
 
 
 def get_stt() -> SpeechToText:
+    """Synchronous loader — always call via run_in_executor (B18)."""
     global _stt
     if _stt is None:
-        logger.info("Loading Qwen3 ASR model...")
-        _stt = SpeechToText()
-        logger.info("Qwen3 ASR model loaded.")
+        with _stt_lock:
+            if _stt is None:
+                emit("[INFO] asr: ▶ Loading Qwen3-ASR-0.6B model into memory…")
+                _stt = SpeechToText()
+                emit("[INFO] asr: ✓ Qwen3 ASR model loaded and ready")
     return _stt
 
 
+def get_tts() -> TextToSpeech:
+    global _tts
+    if _tts is None:  # fast path — no lock
+        with _tts_lock:  # slow path — one thread at a time
+            if _tts is None:  # re-check after acquiring lock
+                emit("[INFO] tts: ▶ Loading pocket-tts model…")
+                _tts = TextToSpeech()
+                emit("[INFO] tts: ✓ TextToSpeech ready")
+    return _tts
+
+
 # ==========================================
-# LLAMA SERVER LIFECYCLE  (replaces enrichment.sh steps 1-4 and 6)
+# B22: BACKGROUND SESSION PRUNING
+# ==========================================
+
+
+async def _session_pruner():
+    """
+    B22: Periodically evict sessions that have been inactive beyond SESSION_TTL_SECONDS.
+    Runs as a background asyncio task for the lifetime of the application.
+    """
+    while True:
+        await asyncio.sleep(300)  # check every 5 minutes
+        now = time.time()
+        expired = [
+            sid
+            for sid, last in _session_last_active.items()
+            if now - last > SESSION_TTL_SECONDS
+        ]
+        for sid in expired:
+            active_sessions.pop(sid, None)
+            _session_last_active.pop(sid, None)
+            logger.info(f"Pruned expired session {sid[:8]}")
+            await broadcast(
+                f"[WARNING] sessions: ■ Session {sid[:8]} pruned (TTL expired)"
+            )
+        if expired:
+            logger.info(f"Pruned {len(expired)} expired session(s).")
+
+
+# ==========================================
+# LLAMA SERVER LIFECYCLE
 # ==========================================
 
 
 def _llama_is_healthy() -> bool:
-    """True if the server is up and the model has finished loading (HTTP 200)."""
     try:
         r = httpx.get(LLAMA_HEALTH_URL, timeout=2)
         return r.status_code == 200
@@ -106,41 +213,37 @@ def _llama_is_healthy() -> bool:
 
 
 def _kill_stale_server():
-    """enrichment.sh step 1 — kill any leftover llama-server from a previous run."""
     result = subprocess.run(["pkill", "-f", "llama-server"], capture_output=True)
     if result.returncode == 0:
         logger.info("Killed stale llama-server process.")
+        emit("[WARNING] llm: ■ Killed stale llama-server process")
         time.sleep(2)
 
 
 def _ensure_llama_running() -> bool:
-    """
-    Start llama-server and wait until the model is fully loaded,
-    mirroring enrichment.sh steps 2-4.
-
-    Returns True if the server is ready, False on any failure.
-    Server is left running after this call (killed only on app shutdown).
-    """
     global _llm_process
 
-    # Already healthy — nothing to do.
     if _llama_is_healthy():
         logger.info("LLM server already running and healthy.")
+        emit("[INFO] llm: ✓ LLM server already running and healthy")
         return True
 
     if not LLAMA_BIN.exists():
         logger.error(f"llama-server binary not found: {LLAMA_BIN}")
+        emit(f"[ERROR] llm: ✗ llama-server binary not found: {LLAMA_BIN}")
         return False
     if not LLAMA_MODEL.exists():
         logger.error(f"LLM model not found: {LLAMA_MODEL}")
+        emit(f"[ERROR] llm: ✗ Model file not found: {LLAMA_MODEL}")
         return False
 
-    # Step 1 — clean up anything leftover.
     _kill_stale_server()
 
-    # Step 2 — start the server, log stdout/stderr to data/server_log.txt.
+    # B08: Open the log file handle, pass it to Popen, then close it immediately.
+    # The child process inherits the fd; the parent no longer needs to hold it open.
     log_fh = open(LLAMA_LOG, "w")
     logger.info("Starting llama-server…")
+    emit(f"[INFO] llm: ▶ Starting llama-server ({LLAMA_MODEL.name})…")
     _llm_process = subprocess.Popen(
         [
             str(LLAMA_BIN),
@@ -154,39 +257,49 @@ def _ensure_llama_running() -> bool:
         stdout=log_fh,
         stderr=log_fh,
     )
+    log_fh.close()  # B08: close our copy; the child process has its own inherited fd
+
     logger.info(
         f"llama-server started (PID {_llm_process.pid}). Waiting for model to load…"
     )
+    emit(
+        f"[INFO] llm: llama-server PID {_llm_process.pid} — waiting for model to load…"
+    )
 
-    # Step 3 — quick sanity check: did the process die immediately?
     time.sleep(10)
     if _llm_process.poll() is not None:
         logger.error("llama-server died immediately. Check data/server_log.txt")
+        emit(
+            "[ERROR] llm: ✗ llama-server exited immediately — check data/server_log.txt"
+        )
         return False
 
-    # Step 4 — health check loop (mirrors enrichment.sh for loop).
     for attempt in range(1, HEALTH_RETRIES + 1):
         time.sleep(HEALTH_INTERVAL)
         if _llama_is_healthy():
             elapsed = attempt * HEALTH_INTERVAL
             logger.info(f"LLM server ready after {elapsed}s.")
+            emit(f"[INFO] llm: ✓ LLM server ready after {elapsed}s")
             return True
         if _llm_process.poll() is not None:
             logger.error(
                 "llama-server process died while waiting. Check data/server_log.txt"
             )
+            emit(
+                "[ERROR] llm: ✗ llama-server died during startup — check data/server_log.txt"
+            )
             return False
+        emit(f"[DEBUG] llm: health check {attempt}/{HEALTH_RETRIES}…")
         logger.debug(f"Health check {attempt}/{HEALTH_RETRIES}…")
 
-    # Timeout — mirror enrichment.sh failure path.
     logger.error("Timeout waiting for LLM server to become healthy.")
+    emit("[ERROR] llm: ✗ Timeout waiting for LLM server — aborting")
     _llm_process.terminate()
     _llm_process = None
     return False
 
 
 def _stop_llama_server():
-    """enrichment.sh step 6 — kill the server on app shutdown."""
     global _llm_process
     if _llm_process and _llm_process.poll() is None:
         _llm_process.terminate()
@@ -195,23 +308,57 @@ def _stop_llama_server():
         except subprocess.TimeoutExpired:
             _llm_process.kill()
         logger.info("LLM server stopped.")
+        emit("[INFO] llm: ■ LLM server stopped")
     _llm_process = None
 
 
 # ==========================================
-# FASTAPI LIFESPAN
+# B27: LIFESPAN (replaces deprecated @app.on_event)
 # ==========================================
 
 
-@app.on_event("startup")
-async def startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global _main_loop
+    # Startup — store the running loop so emit() works from background threads
+    _main_loop = asyncio.get_running_loop()
+    asyncio.create_task(_session_pruner())  # B22: launch session pruner
+    await broadcast("[INFO] orchestrator: ✓ QuestionPrep API started")
     logger.info("QuestionPrep API started.")
-
-
-@app.on_event("shutdown")
-async def shutdown():
+    yield
+    # Shutdown
+    await broadcast("[INFO] orchestrator: ■ QuestionPrep API shutting down")
     _stop_llama_server()
     logger.info("QuestionPrep API shut down.")
+
+
+# ==========================================
+# APP & TEMPLATES
+# ==========================================
+
+app = FastAPI(title="QuestionPrep API", lifespan=lifespan)  # B27
+
+# B25: Rate limiter — keyed by client IP.
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# B10: Wildcard origin + allow_credentials=True is rejected by all modern browsers.
+# Specify only the origins you actually serve from.
+ALLOWED_ORIGINS = os.environ.get(
+    "ALLOWED_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000"
+).split(",")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,  # B10: was ["*"]
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
+templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 
 # ==========================================
@@ -243,6 +390,10 @@ class StartInterviewRequest(BaseModel):
     user_id: str
 
 
+class TTSRequest(BaseModel):
+    text: str
+
+
 # ==========================================
 # BACKGROUND TASKS
 # ==========================================
@@ -250,6 +401,8 @@ class StartInterviewRequest(BaseModel):
 
 def run_ingestion_task(temp_path: Path, user_id: str):
     """CPU/IO-heavy ingestion — chunking, SimHash dedup, DB insert."""
+    fname = temp_path.name.split("_", 1)[-1]  # strip uuid prefix for display
+    emit(f"[INFO] ingest: ▶ Ingesting {fname} for user {user_id[:8]}…")
     try:
         converter = PDFDocumentConverter()
         chunker = MarkdownChunker(ChunkConfig(max_chunk_tokens=1000))
@@ -271,46 +424,63 @@ def run_ingestion_task(temp_path: Path, user_id: str):
             auto_confirm=True,
         )
 
-        if success:
+        if success and file_id:
             db.assign_file_to_user(user_id, file_id)
             logger.info(f"Ingested file {file_id} for user {user_id}")
-
-        if temp_path.exists():
-            temp_path.unlink()
+            emit(f"[INFO] ingest: ✓ {fname} ingested — file_id {file_id[:8]}")
+        else:
+            emit(
+                f"[WARNING] ingest: ■ {fname} skipped (duplicate or conversion failed)"
+            )
 
     except Exception as e:
         logger.error(f"Ingestion failed: {e}")
+        emit(f"[ERROR] ingest: ✗ Ingestion failed for {fname}: {e}")
+    finally:
+        # B09: Always clean up the temp file, even if ingestion fails.
+        if temp_path.exists():
+            temp_path.unlink(missing_ok=True)
 
 
 def run_enrichment_task(file_id: str):
     """
     LLM enrichment + vector indexing for one file.
 
-    Starts the llama-server if not already running (same as enrichment.sh),
-    then calls EnrichmentManager and VectorIndexer directly — no subprocess needed
-    for the Python side since we're already inside uv's environment.
+    B11: _stop_llama_server() removed from finally block.
+         Killing the server after every task meant a second queued file
+         always found no server running. The server now stays alive between
+         tasks and is only stopped in the lifespan shutdown handler.
     """
+    _inc_enrichments()
+    emit(f"[INFO] enricher: ▶ Starting enrichment for file {file_id[:8]}…")
     try:
-        # Start (or verify) the LLM server — mirrors enrichment.sh steps 1-4.
         if not _ensure_llama_running():
             logger.error(
                 f"Enrichment aborted for {file_id[:8]} — LLM server could not start. "
                 "Is the USB stick mounted? Check data/server_log.txt for details."
             )
+            emit(
+                f"[ERROR] enricher: ✗ Enrichment aborted for {file_id[:8]} — LLM server failed to start"
+            )
             return
 
         logger.info(f"Running enrichment for file {file_id[:8]}…")
+        emit(f"[INFO] enricher: Running LLM enrichment for {file_id[:8]}…")
         EnrichmentManager().enrich_single_file(file_id)
 
         logger.info(f"Running vector indexing for file {file_id[:8]}…")
+        emit(f"[INFO] enricher: Running vector indexing for {file_id[:8]}…")
         VectorIndexer().index_file(file_id)
 
         logger.info(f"Enrichment + indexing complete for file {file_id[:8]}.")
+        emit(f"[INFO] enricher: ✓ Enrichment + indexing complete for {file_id[:8]}")
 
     except Exception as e:
         logger.error(f"Enrichment task failed for {file_id}: {e}")
+        emit(f"[ERROR] enricher: ✗ Enrichment failed for {file_id[:8]}: {e}")
     finally:
-        _stop_llama_server()
+        _dec_enrichments()
+    # B11: No _stop_llama_server() here — server stays running for next task
 
 
 # ==========================================
@@ -345,7 +515,11 @@ async def get_interview_page(request: Request):
 
 @app.post("/api/auth/signup")
 async def signup(user: SignupRequest):
-    user_id = db.create_user(username=user.username, email=user.email)
+    user_id = db.create_user(
+        username=user.username,
+        email=user.email,
+        password=user.password,  # B01: password now passed to DBManager for hashing
+    )
     if not user_id:
         raise HTTPException(status_code=400, detail="Username or email already exists")
     return {"message": "User created successfully", "user_id": user_id}
@@ -356,6 +530,9 @@ async def login(user: LoginRequest):
     db_user = db.get_user_by_username(user.username)
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
+    # B01: Verify hashed password
+    if not db.verify_password(user.username, user.password):
+        raise HTTPException(status_code=401, detail="Invalid password")
     return {"token": "mock-jwt-token", "user": db_user}
 
 
@@ -373,8 +550,12 @@ async def get_profile(user_id: str):
 
 
 @app.post("/api/files/ingest")
+@limiter.limit("5/minute")  # B25: max 5 uploads per minute per IP
 async def ingest_file(
-    user_id: str, background_tasks: BackgroundTasks, file: UploadFile = File(...)
+    request: Request,  # B25: slowapi requires Request in the signature
+    user_id: str,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
 ):
     if not db.get_user_by_id(user_id):
         raise HTTPException(status_code=404, detail="User not found")
@@ -392,7 +573,23 @@ async def ingest_file(
 
 
 @app.post("/api/questions/generate")
-async def generate_questions(req: GenerateRequest, background_tasks: BackgroundTasks):
+@limiter.limit("10/minute")  # B25: max 10 generation requests per minute per IP
+async def generate_questions(
+    request: Request,  # B25: slowapi requires Request in the signature
+    req: GenerateRequest,
+    background_tasks: BackgroundTasks,
+):
+    # B25: Skip enrichment if this file already has questions — prevents duplicate
+    #      concurrent enrichment of the same file draining CPU and llama-server.
+    existing = db.get_questions_for_file(req.file_id)
+    if existing:
+        return {
+            "message": (
+                f"File {req.file_id[:8]} already has {len(existing)} question(s). "
+                "Delete them first to re-enrich."
+            ),
+            "skipped": True,
+        }
     background_tasks.add_task(run_enrichment_task, req.file_id)
     return {"message": f"Enrichment and indexing started for file {req.file_id}"}
 
@@ -400,6 +597,27 @@ async def generate_questions(req: GenerateRequest, background_tasks: BackgroundT
 @app.get("/api/files")
 async def list_user_files(user_id: str):
     return {"files": db.get_files_for_user(user_id)}
+
+
+@app.delete("/api/files/{file_id}")
+async def delete_file(file_id: str, user_id: str):
+    """Delete a file and its Chroma embeddings. B12 handled here."""
+    # Verify the file belongs to this user
+    user_files = db.get_files_for_user(user_id)
+    if not any(f["file_id"] == file_id for f in user_files):
+        raise HTTPException(status_code=403, detail="File not found or access denied")
+
+    # B12: Delete Chroma embeddings before removing SQL records
+    try:
+        indexer = VectorIndexer()
+        indexer.delete_embeddings_for_file(file_id)
+    except Exception as e:
+        logger.warning(f"Chroma cleanup failed for {file_id[:8]}: {e}")
+
+    deleted = db.delete_file(file_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="File not found")
+    return {"message": "File and embeddings deleted successfully"}
 
 
 # ==========================================
@@ -424,6 +642,10 @@ async def start_interview(req: StartInterviewRequest):
         )
 
     active_sessions[session_id] = session
+    _session_last_active[session_id] = time.time()  # B22: track creation time
+    await broadcast(
+        f"[INFO] sessions: ✓ New session {session_id[:8]} started for user {req.user_id[:8]}"
+    )
     return {"session_id": session_id, "first_question": first_question}
 
 
@@ -432,7 +654,23 @@ async def evaluate_answer(req: EvaluateRequest):
     session = active_sessions.get(req.session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    _session_last_active[req.session_id] = time.time()  # B22: refresh TTL
     return session.evaluate_turn(req.user_answer)
+
+
+# B03: New status endpoint so the client can verify a session still exists after a reload.
+@app.get("/api/interview/{session_id}/status")
+async def get_session_status(session_id: str):
+    session = active_sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found or expired")
+    current_q = session.ctx.current_question
+    return {
+        "alive": True,
+        "state": session.state.name,
+        "current_question": current_q.text if current_q else None,
+        "questions_answered": len(session.ctx.history),
+    }
 
 
 @app.get("/api/interview/{session_id}/summary")
@@ -464,30 +702,173 @@ async def end_session(session_id: str):
     global _stt
     if session_id in active_sessions:
         del active_sessions[session_id]
+    _session_last_active.pop(session_id, None)  # B22: clean up TTL tracker
 
+    # RACE FIX: Previously _stt was set to None without holding _stt_lock.
+    # A thread pool worker running get_stt() could have already passed the
+    # outer `if _stt is None` check, then this async handler nulled the
+    # global, leading to a second concurrent model load or use of a
+    # partially freed object.
+    # Fix: acquire _stt_lock before reading/writing _stt here, mirroring
+    # the double-checked locking pattern used in get_stt() itself.
     if not active_sessions and _stt is not None:
-        del _stt
-        _stt = None
-        logger.info("Qwen3 ASR model unloaded — no active sessions.")
+        with _stt_lock:
+            if not active_sessions and _stt is not None:
+                _stt = None  # B30: assign None (safe now that we hold the lock)
+                logger.info("Qwen3 ASR model unloaded — no active sessions.")
+                await broadcast(
+                    "[INFO] asr: ■ Qwen3 ASR model unloaded — no active sessions remain"
+                )
 
+    await broadcast(
+        f"[INFO] sessions: ■ Session {session_id[:8]} ended ({len(active_sessions)} remaining)"
+    )
     return {"message": "Session ended"}
+
+
+# ==========================================
+# VOICE API ROUTES
+# ==========================================
 
 
 @app.post("/api/analyze-speech")
 async def analyze_speech(audio: UploadFile = File(...)):
     try:
         audio_bytes = await audio.read()
-        transcript = get_stt().transcribe_opus_bytes(audio_bytes)
-        analysis = analyze_disfluencies(transcript)
-        return {
-            "transcript": transcript,
-            "stutter_flag": analysis["stutter_flag"],
-            "disfluency_rate": analysis["disfluency_rate"],
-            "details": analysis,
-        }
+
+        loop = asyncio.get_running_loop()
+        stt = await loop.run_in_executor(None, get_stt)
+
+        # Use transcribe_and_analyze() which combines transcription + disfluency
+        # in one call, matching what SpeechToText already encapsulates.
+        result = await loop.run_in_executor(
+            None, stt.transcribe_and_analyze, audio_bytes
+        )
+        words = len((result.get("transcript") or "").split())
+        await broadcast(
+            f"[INFO] asr: ✓ Transcribed {words} words — "
+            f"stutter={'yes' if result.get('stutter_flag') else 'no'}  "
+            f"rate={result.get('disfluency_rate', 0):.2%}"
+        )
+        return result
+
+    except FileNotFoundError as e:
+        # ffmpeg not installed or not on PATH — most common STT failure cause
+        msg = "ffmpeg not found. Install it: sudo apt install ffmpeg (Linux) or brew install ffmpeg (Mac)."
+        logger.error(msg)
+        raise HTTPException(status_code=500, detail=msg)
+    except RuntimeError as e:
+        if "ffmpeg" in str(e).lower():
+            msg = f"ffmpeg decode failed: {e}. Check the audio format sent by the browser."
+        else:
+            msg = str(e)
+        logger.exception(f"STT runtime error: {e}")
+        raise HTTPException(status_code=500, detail=msg)
     except Exception as e:
-        logger.error(f"Speech analysis failed: {e}")
+        # Log the full traceback so the real cause is visible in the server log
+        # (model not downloaded, soundfile missing, etc.)
+        logger.exception(f"Speech analysis failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# B02: TTS endpoint — was fully implemented in qp-voice but never wired up.
+@app.post("/api/tts")
+async def text_to_speech(req: TTSRequest):
+    """
+    B02: Convert text to speech and return a WAV audio stream.
+    Called by interview.js after each question is displayed.
+
+    Fix: generate_wav_bytes() returns io.BytesIO.
+    StreamingResponse cannot iterate a BytesIO directly — it needs an async
+    generator or plain bytes. Use Response with .read() instead.
+    """
+    if not req.text or not req.text.strip():
+        raise HTTPException(status_code=400, detail="Text cannot be empty")
+    try:
+        loop = asyncio.get_running_loop()
+        tts = await loop.run_in_executor(None, get_tts)
+        wav_bytes = await loop.run_in_executor(None, tts.generate_wav_bytes, req.text)
+        # FIX: was StreamingResponse(wav_bytes, ...) which silently sends nothing
+        # because StreamingResponse cannot consume a BytesIO object.
+        # Response() accepts raw bytes directly via .read().
+
+        audio_data = wav_bytes.read()
+        await broadcast(
+            f"[INFO] tts: ✓ Generated {len(audio_data) // 1024} KB of audio"
+        )
+        return PlainResponse(content=audio_data, media_type="audio/wav")
+    except Exception as e:
+        # Use logger.exception so the full traceback appears in the server log.
+        logger.exception(f"TTS failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==========================================
+# SSE STATUS ENDPOINTS
+# ==========================================
+
+
+@app.get("/api/events")
+async def sse_events(request: Request):
+    """
+    Server-Sent Events stream consumed by status-panel.js.
+
+    Each message is a plain text string formatted as:
+        [LEVEL] source: message text
+    e.g.  [INFO] enricher: ✓ Enrichment complete for a1b2c3d4
+
+    The panel also receives an SSE comment (": heartbeat") every 15 s to
+    prevent proxies from closing the idle connection.
+    """
+    queue: asyncio.Queue = asyncio.Queue(maxsize=200)
+    _sse_clients.add(queue)
+
+    async def event_generator():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    msg = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    # SSE spec: each event is "data: ...\n\n"
+                    yield f"data: {msg}\n\n"
+                except asyncio.TimeoutError:
+                    # Send a keep-alive comment so the connection stays open
+                    yield ": heartbeat\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            _sse_clients.discard(queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            # Tell nginx / any reverse proxy not to buffer this stream
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.get("/api/status")
+async def get_system_status():
+    """
+    Snapshot of backend component states, polled every 5 s by status-panel.js.
+
+    Returns:
+        llm_server_running  — whether llama-server is currently healthy
+        active_enrichments  — number of enrichment tasks running right now
+        sessions_with_asr   — 1 if the Qwen3 ASR model is loaded, 0 otherwise
+        active_sessions     — number of live interview sessions
+    """
+    return {
+        "llm_server_running": _llama_is_healthy(),
+        "active_enrichments": _active_enrichments,
+        "sessions_with_asr": 1 if _stt is not None else 0,
+        "active_sessions": len(active_sessions),
+    }
 
 
 # ==========================================

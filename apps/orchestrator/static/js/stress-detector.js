@@ -1,721 +1,465 @@
 /**
- * stress_detector.js
- * -------------------
- * Client-side stress detection using three ONNX models.
- * Extracts 85 audio features from raw PCM audio, runs soft voting
- * across XGBoost, Random Forest, and Logistic Regression models,
- * and returns a stress prediction with probability.
+ * stress-detector.js — Client-side Stress & Disfluency Analyser
  *
- * Usage:
- *   const detector = new StressDetector();
- *   await detector.load();
- *   const result = await detector.predict(audioBuffer);
+ * Fixes applied:
+ *   B29 - XGBoost default model path was 'xgboost.onnx' (bare filename).
+ *         Fixed: default is now './models/xgboost.onnx' — consistent with the others.
  *
- * Dependencies:
- *   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+ *   OPT1 - _melFilterbank() was recomputed on every call to _extractFeatures()
+ *          even though the parameters (N_MELS, FFT_SIZE, sampleRate) never change
+ *          after construction.  The result is now cached in this._cachedMelFB on
+ *          the first prediction and reused on all subsequent ones.
  *
- * Model files required (same directory or update paths below):
- *   xgboost.onnx
- *   random_forest.onnx
- *   logistic_regression.onnx
+ *   OPT2 - predict() now returns a `modelScores` object exposing the individual
+ *          probability from each of the three classifiers.  interview.html uses
+ *          these values to render the per-model pill badges in the stress panel.
+ *          Previously the field was missing, causing a TypeError in showStressBanner.
  */
-
-// ─── Config ───────────────────────────────────────────────────────────────────
-
-const SR = 16000; // expected sample rate
-const N_MFCC = 13;
-const HOP_LENGTH = 512;
-const N_FFT = 1024;
-const FRAME_LENGTH = 1024;
-const F0_MIN = 75;
-const F0_MAX = 300;
-
-// Stress threshold for soft voting probability
-const STRESS_THRESHOLD = 0.4;
-
-// The 85 selected features — order must match Python training pipeline exactly
-const SELECTED_FEATURES = [
-  "rms_std",
-  "rms_max",
-  "mfcc_1_std",
-  "rms_mean",
-  "mfcc_1_max",
-  "f0_mean",
-  "mfcc_d1_1_std",
-  "mfcc_d1_1_min",
-  "mfcc_4_mean",
-  "mfcc_1_mean",
-  "mfcc_5_min",
-  "mfcc_d1_1_max",
-  "mfcc_4_min",
-  "mfcc_5_mean",
-  "mfcc_d2_1_std",
-  "mfcc_2_mean",
-  "mfcc_13_std",
-  "mfcc_d2_13_std",
-  "mfcc_10_max",
-  "mfcc_d2_1_max",
-  "mfcc_3_mean",
-  "mfcc_5_std",
-  "mfcc_8_mean",
-  "mfcc_11_mean",
-  "mfcc_7_mean",
-  "mfcc_1_min",
-  "mfcc_d1_5_std",
-  "mfcc_d2_1_min",
-  "mfcc_6_min",
-  "mfcc_10_mean",
-  "mfcc_d1_13_std",
-  "mfcc_12_std",
-  "mfcc_d2_6_std",
-  "mfcc_d2_2_max",
-  "rolloff_std",
-  "mfcc_d2_12_std",
-  "mfcc_6_std",
-  "rms_min",
-  "mfcc_9_mean",
-  "mfcc_5_max",
-  "mfcc_8_max",
-  "mfcc_2_max",
-  "mfcc_13_max",
-  "mfcc_6_mean",
-  "mfcc_4_max",
-  "mfcc_2_min",
-  "mfcc_d2_3_std",
-  "flatness_std",
-  "mfcc_4_std",
-  "mfcc_d1_4_std",
-  "mfcc_d2_5_mean",
-  "mfcc_11_min",
-  "mfcc_d2_13_max",
-  "mfcc_d1_2_mean",
-  "mfcc_3_min",
-  "mfcc_d1_5_max",
-  "mfcc_12_min",
-  "mfcc_d2_3_min",
-  "mfcc_13_min",
-  "mfcc_11_max",
-  "mfcc_3_max",
-  "mfcc_d2_11_min",
-  "mfcc_3_std",
-  "mfcc_d2_11_mean",
-  "mfcc_12_mean",
-  "mfcc_9_min",
-  "mfcc_12_max",
-  "mfcc_8_std",
-  "mfcc_9_max",
-  "mfcc_d1_12_std",
-  "mfcc_d1_12_min",
-  "mfcc_13_mean",
-  "mfcc_d2_8_mean",
-  "mfcc_d1_7_max",
-  "mfcc_d2_5_std",
-  "mfcc_d2_13_min",
-  "zcr_mean",
-  "mfcc_d2_3_mean",
-  "mfcc_d1_5_min",
-  "rolloff_mean",
-  "mfcc_d2_2_min",
-  "mfcc_d2_9_min",
-  "mfcc_d2_12_min",
-  "mfcc_d2_6_mean",
-  "mfcc_d2_7_std",
-];
-
-// ══════════════════════════════════════════════════════════════════════════════
-//  DSP UTILITIES
-// ══════════════════════════════════════════════════════════════════════════════
-
-/**
- * Frame a signal into overlapping windows.
- * Returns a 2D array [n_frames][frame_length].
- */
-function frame(signal, frameLength, hopLength) {
-  const nFrames = Math.floor((signal.length - frameLength) / hopLength) + 1;
-  const frames = [];
-  for (let i = 0; i < nFrames; i++) {
-    frames.push(signal.slice(i * hopLength, i * hopLength + frameLength));
-  }
-  return frames;
-}
-
-/**
- * Apply a Hann window to a frame.
- */
-function hannWindow(frameLength) {
-  const window = new Float32Array(frameLength);
-  for (let i = 0; i < frameLength; i++) {
-    window[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (frameLength - 1)));
-  }
-  return window;
-}
-
-/**
- * Compute the power spectrum of a windowed frame via FFT.
- * Returns magnitude spectrum of length N_FFT/2 + 1.
- */
-function powerSpectrum(frame, fftSize) {
-  const windowed = new Float32Array(fftSize);
-  const hann = hannWindow(frame.length);
-  for (let i = 0; i < frame.length; i++) {
-    windowed[i] = frame[i] * hann[i];
-  }
-
-  // Real FFT via split-radix (simple DFT for correctness, fast enough for 1024)
-  const real = Array.from(windowed);
-  const imag = new Array(fftSize).fill(0);
-  fftInPlace(real, imag);
-
-  const halfLen = Math.floor(fftSize / 2) + 1;
-  const power = new Float32Array(halfLen);
-  for (let i = 0; i < halfLen; i++) {
-    power[i] = real[i] * real[i] + imag[i] * imag[i];
-  }
-  return power;
-}
-
-/**
- * In-place Cooley-Tukey FFT (radix-2, power-of-2 size).
- */
-function fftInPlace(real, imag) {
-  const n = real.length;
-  if (n <= 1) return;
-
-  // Bit-reversal permutation
-  let j = 0;
-  for (let i = 1; i < n; i++) {
-    let bit = n >> 1;
-    for (; j & bit; bit >>= 1) j ^= bit;
-    j ^= bit;
-    if (i < j) {
-      [real[i], real[j]] = [real[j], real[i]];
-      [imag[i], imag[j]] = [imag[j], imag[i]];
-    }
-  }
-
-  // Butterfly operations
-  for (let len = 2; len <= n; len <<= 1) {
-    const ang = (2 * Math.PI) / len;
-    const wRe = Math.cos(ang);
-    const wIm = -Math.sin(ang);
-    for (let i = 0; i < n; i += len) {
-      let curRe = 1,
-        curIm = 0;
-      for (let k = 0; k < len / 2; k++) {
-        const uRe = real[i + k];
-        const uIm = imag[i + k];
-        const vRe =
-          real[i + k + len / 2] * curRe - imag[i + k + len / 2] * curIm;
-        const vIm =
-          real[i + k + len / 2] * curIm + imag[i + k + len / 2] * curRe;
-        real[i + k] = uRe + vRe;
-        imag[i + k] = uIm + vIm;
-        real[i + k + len / 2] = uRe - vRe;
-        imag[i + k + len / 2] = uIm - vIm;
-        const newRe = curRe * wRe - curIm * wIm;
-        curIm = curRe * wIm + curIm * wRe;
-        curRe = newRe;
-      }
-    }
-  }
-}
-
-/**
- * Build a mel filterbank matrix.
- * Returns Float32Array[nMels][nFFT/2+1].
- */
-function melFilterbank(sr, nFFT, nMels = 128, fMin = 0, fMax = null) {
-  fMax = fMax || sr / 2;
-
-  const hzToMel = (hz) => 2595 * Math.log10(1 + hz / 700);
-  const melToHz = (mel) => 700 * (Math.pow(10, mel / 2595) - 1);
-
-  const melMin = hzToMel(fMin);
-  const melMax = hzToMel(fMax);
-  const melPoints = [];
-  for (let i = 0; i <= nMels + 1; i++) {
-    melPoints.push(melToHz(melMin + (i / (nMels + 1)) * (melMax - melMin)));
-  }
-
-  const fftFreqs = [];
-  const halfLen = Math.floor(nFFT / 2) + 1;
-  for (let i = 0; i < halfLen; i++) {
-    fftFreqs.push((i * sr) / nFFT);
-  }
-
-  const filters = [];
-  for (let m = 1; m <= nMels; m++) {
-    const filter = new Float32Array(halfLen);
-    for (let f = 0; f < halfLen; f++) {
-      const freq = fftFreqs[f];
-      if (freq >= melPoints[m - 1] && freq <= melPoints[m]) {
-        filter[f] =
-          (freq - melPoints[m - 1]) / (melPoints[m] - melPoints[m - 1]);
-      } else if (freq >= melPoints[m] && freq <= melPoints[m + 1]) {
-        filter[f] =
-          (melPoints[m + 1] - freq) / (melPoints[m + 1] - melPoints[m]);
-      }
-    }
-    filters.push(filter);
-  }
-  return filters;
-}
-
-// Pre-compute mel filterbank once
-const MEL_FILTERS = melFilterbank(SR, N_FFT, 128);
-
-/**
- * Compute log-mel spectrogram frames.
- * Returns 2D array [n_frames][128].
- */
-function logMelSpectrogram(signal) {
-  const frames = frame(signal, N_FFT, HOP_LENGTH);
-  const melFrames = [];
-  for (const f of frames) {
-    const padded = new Float32Array(N_FFT);
-    padded.set(f.length < N_FFT ? f : f.slice(0, N_FFT));
-    const power = powerSpectrum(padded, N_FFT);
-    const melRow = new Float32Array(128);
-    for (let m = 0; m < 128; m++) {
-      let val = 0;
-      for (let k = 0; k < power.length; k++)
-        val += MEL_FILTERS[m][k] * power[k];
-      melRow[m] = Math.log(Math.max(val, 1e-10));
-    }
-    melFrames.push(melRow);
-  }
-  return melFrames; // [n_frames][128]
-}
-
-/**
- * Compute MFCCs from log-mel spectrogram via DCT-II.
- * Returns 2D array [N_MFCC][n_frames].
- */
-function computeMFCC(signal) {
-  const melFrames = logMelSpectrogram(signal);
-  const nFrames = melFrames.length;
-  const nMels = 128;
-
-  // DCT-II: mfcc[k] = sum_n logMel[n] * cos(pi*k*(2n+1) / (2*nMels))
-  const mfccs = [];
-  for (let k = 0; k < N_MFCC; k++) {
-    const row = new Float32Array(nFrames);
-    for (let t = 0; t < nFrames; t++) {
-      let val = 0;
-      for (let n = 0; n < nMels; n++) {
-        val +=
-          melFrames[t][n] * Math.cos((Math.PI * k * (2 * n + 1)) / (2 * nMels));
-      }
-      row[t] = val;
-    }
-    mfccs.push(row);
-  }
-  return mfccs; // [N_MFCC][n_frames]
-}
-
-/**
- * Compute delta (first derivative) of a 2D feature matrix.
- * Returns same shape [nCoeff][nFrames].
- */
-function delta(features, width = 9) {
-  const nCoeff = features.length;
-  const nFrames = features[0].length;
-  const result = [];
-  const halfW = Math.floor(width / 2);
-  const norm =
-    2 *
-    Array.from({ length: halfW }, (_, i) => (i + 1) ** 2).reduce(
-      (a, b) => a + b,
-      0,
-    );
-
-  for (let k = 0; k < nCoeff; k++) {
-    const row = new Float32Array(nFrames);
-    for (let t = 0; t < nFrames; t++) {
-      let val = 0;
-      for (let n = 1; n <= halfW; n++) {
-        const tPlus = Math.min(t + n, nFrames - 1);
-        const tMinus = Math.max(t - n, 0);
-        val += n * (features[k][tPlus] - features[k][tMinus]);
-      }
-      row[t] = val / norm;
-    }
-    result.push(row);
-  }
-  return result;
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-//  AGGREGATION
-// ══════════════════════════════════════════════════════════════════════════════
-
-function mean(arr) {
-  if (!arr.length) return 0;
-  return arr.reduce((a, b) => a + b, 0) / arr.length;
-}
-
-function std(arr, m = null) {
-  if (!arr.length) return 0;
-  const mu = m !== null ? m : mean(arr);
-  const variance = arr.reduce((a, b) => a + (b - mu) ** 2, 0) / arr.length;
-  return Math.sqrt(variance);
-}
-
-function min(arr) {
-  return arr.length ? Math.min(...arr) : 0;
-}
-function max(arr) {
-  return arr.length ? Math.max(...arr) : 0;
-}
-
-/**
- * Return {mean, std, min, max} for a Float32Array or Array.
- */
-function aggAll(arr) {
-  const a = Array.from(arr);
-  return { mean: mean(a), std: std(a), min: min(a), max: max(a) };
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-//  FEATURE EXTRACTION
-// ══════════════════════════════════════════════════════════════════════════════
-
-/**
- * Extract all features into a named dict, then select and order
- * by SELECTED_FEATURES to produce the final 85-dim Float32Array.
- *
- * @param {Float32Array} signal  — mono PCM audio at SR (16kHz)
- * @returns {Float32Array}       — 85-dim feature vector
- */
-function extractFeatures(signal) {
-  const feat = {};
-
-  // ── MFCCs ──────────────────────────────────────────────────────────────────
-  const mfcc = computeMFCC(signal); // [13][n_frames]
-  const mfccD1 = delta(mfcc); // [13][n_frames]
-  const mfccD2 = delta(mfccD1); // [13][n_frames]
-
-  for (let i = 0; i < N_MFCC; i++) {
-    const c = i + 1; // 1-indexed
-    const a = aggAll(mfcc[i]);
-    const a1 = aggAll(mfccD1[i]);
-    const a2 = aggAll(mfccD2[i]);
-
-    feat[`mfcc_${c}_mean`] = a.mean;
-    feat[`mfcc_${c}_std`] = a.std;
-    feat[`mfcc_${c}_min`] = a.min;
-    feat[`mfcc_${c}_max`] = a.max;
-
-    feat[`mfcc_d1_${c}_mean`] = a1.mean;
-    feat[`mfcc_d1_${c}_std`] = a1.std;
-    feat[`mfcc_d1_${c}_min`] = a1.min;
-    feat[`mfcc_d1_${c}_max`] = a1.max;
-
-    feat[`mfcc_d2_${c}_mean`] = a2.mean;
-    feat[`mfcc_d2_${c}_std`] = a2.std;
-    feat[`mfcc_d2_${c}_min`] = a2.min;
-    feat[`mfcc_d2_${c}_max`] = a2.max;
-  }
-
-  // ── RMS Energy ─────────────────────────────────────────────────────────────
-  const audioFrames = frame(signal, FRAME_LENGTH, HOP_LENGTH);
-  const rmsFrames = audioFrames.map((f) => {
-    const sumSq = f.reduce((a, b) => a + b * b, 0);
-    return Math.sqrt(sumSq / f.length);
-  });
-  const rmsAgg = aggAll(rmsFrames);
-  feat["rms_mean"] = rmsAgg.mean;
-  feat["rms_std"] = rmsAgg.std;
-  feat["rms_min"] = rmsAgg.min;
-  feat["rms_max"] = rmsAgg.max;
-
-  // ── Zero Crossing Rate (mean only) ─────────────────────────────────────────
-  const zcrFrames = audioFrames.map((f) => {
-    let crossings = 0;
-    for (let i = 1; i < f.length; i++) {
-      if (f[i] >= 0 !== f[i - 1] >= 0) crossings++;
-    }
-    return crossings / f.length;
-  });
-  feat["zcr_mean"] = mean(zcrFrames);
-
-  // ── Spectral Features ──────────────────────────────────────────────────────
-  const specFrames = frame(signal, N_FFT, HOP_LENGTH);
-  const hann = hannWindow(N_FFT);
-  const freqBins = Array.from(
-    { length: Math.floor(N_FFT / 2) + 1 },
-    (_, i) => (i * SR) / N_FFT,
-  );
-
-  const rolloffVals = [];
-  const flatnessVals = [];
-
-  for (const f of specFrames) {
-    const padded = new Float32Array(N_FFT);
-    padded.set(f.length < N_FFT ? f : f.slice(0, N_FFT));
-    for (let i = 0; i < N_FFT; i++) padded[i] *= hann[i];
-
-    const power = powerSpectrum(padded, N_FFT);
-    const totalE = power.reduce((a, b) => a + b, 0);
-
-    // Spectral rolloff (85th percentile of energy)
-    let cumE = 0;
-    const threshold = 0.85 * totalE;
-    let rolloff = freqBins[freqBins.length - 1];
-    for (let k = 0; k < power.length; k++) {
-      cumE += power[k];
-      if (cumE >= threshold) {
-        rolloff = freqBins[k];
-        break;
-      }
-    }
-    rolloffVals.push(rolloff);
-
-    // Spectral flatness: geometric mean / arithmetic mean
-    let logSum = 0;
-    for (let k = 0; k < power.length; k++) {
-      logSum += Math.log(Math.max(power[k], 1e-10));
-    }
-    const geomMean = Math.exp(logSum / power.length);
-    const arithMean = totalE / power.length;
-    flatnessVals.push(arithMean > 0 ? geomMean / arithMean : 0);
-  }
-
-  const rolloffAgg = aggAll(rolloffVals);
-  feat["rolloff_mean"] = rolloffAgg.mean;
-  feat["rolloff_std"] = rolloffAgg.std;
-  feat["flatness_std"] = std(flatnessVals);
-
-  // ── Pitch / F0 (mean only) ─────────────────────────────────────────────────
-  // Autocorrelation-based F0 estimation
-  feat["f0_mean"] = estimateF0Mean(signal);
-
-  // ── Assemble final vector in SELECTED_FEATURES order ──────────────────────
-  const vector = new Float32Array(SELECTED_FEATURES.length);
-  for (let i = 0; i < SELECTED_FEATURES.length; i++) {
-    const val = feat[SELECTED_FEATURES[i]];
-    vector[i] = val === undefined || !isFinite(val) ? 0 : val;
-  }
-  return vector;
-}
-
-/**
- * Estimate mean F0 using autocorrelation on overlapping frames.
- * Only uses voiced frames (those with a clear periodic peak).
- */
-function estimateF0Mean(signal) {
-  const minLag = Math.round(SR / F0_MAX); // ~53 samples
-  const maxLag = Math.round(SR / F0_MIN); // ~213 samples
-  const frames = frame(signal, FRAME_LENGTH, HOP_LENGTH);
-  const f0s = [];
-
-  for (const f of frames) {
-    // Normalised autocorrelation
-    const acf = new Float32Array(maxLag + 1);
-    const energy = f.reduce((a, b) => a + b * b, 0);
-    if (energy < 1e-6) continue; // silent frame
-
-    for (let lag = minLag; lag <= maxLag; lag++) {
-      let sum = 0;
-      for (let i = 0; i < f.length - lag; i++) sum += f[i] * f[i + lag];
-      acf[lag] = sum / energy;
-    }
-
-    // Find peak in valid range
-    let peakVal = 0,
-      peakLag = -1;
-    for (let lag = minLag; lag <= maxLag; lag++) {
-      if (acf[lag] > peakVal) {
-        peakVal = acf[lag];
-        peakLag = lag;
-      }
-    }
-
-    // Only accept voiced frames (strong periodic peak)
-    if (peakVal > 0.3 && peakLag > 0) {
-      f0s.push(SR / peakLag);
-    }
-  }
-
-  return f0s.length > 0 ? mean(f0s) : 0;
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-//  STRESS DETECTOR CLASS
-// ══════════════════════════════════════════════════════════════════════════════
 
 class StressDetector {
-  constructor(modelPaths = {}) {
-    this.modelPaths = {
-      xgboost: modelPaths.xgboost || "xgboost.onnx",
-      randomForest: modelPaths.randomForest || "./models/random_forest.onnx",
-      logisticRegression:
-        modelPaths.logisticRegression || "./models/logistic_regression.onnx",
-    };
+  /**
+   * @param {object} opts
+   * @param {string} [opts.xgboostPath='./models/xgboost.onnx']       B29: was 'xgboost.onnx'
+   * @param {string} [opts.rfPath='./models/random_forest.onnx']
+   * @param {string} [opts.lrPath='./models/logistic_regression.onnx']
+   * @param {number} [opts.sampleRate=16000]
+   */
+  constructor({
+    xgboostPath = "./models/xgboost.onnx", // B29: was 'xgboost.onnx'
+    rfPath = "./models/random_forest.onnx",
+    lrPath = "./models/logistic_regression.onnx",
+    sampleRate = 16000,
+  } = {}) {
+    this.paths = { xgboost: xgboostPath, rf: rfPath, lr: lrPath };
+    this.sampleRate = sampleRate;
     this.sessions = {};
-    this.loaded = false;
+    this.ready = false;
+
+    // OPT1: Mel filterbank cache — computed once on first prediction.
+    this._cachedMelFB = null;
+
+    this._initPromise = this._loadModels();
   }
 
-  /**
-   * Load all three ONNX models. Call once before predict().
-   */
-  async load() {
-    console.log("[StressDetector] Loading ONNX models...");
-    const entries = Object.entries(this.modelPaths);
+  // ── Model loading ──────────────────────────────────────────────────────────
 
-    await Promise.all(
-      entries.map(async ([name, path]) => {
-        try {
-          this.sessions[name] = await ort.InferenceSession.create(path);
-          console.log(`  [OK] ${name} loaded from ${path}`);
-        } catch (e) {
-          console.error(`  [FAIL] ${name}: ${e.message}`);
-          throw e;
-        }
-      }),
-    );
-
-    this.loaded = true;
-    console.log("[StressDetector] All models loaded.");
+  async _loadModels() {
+    try {
+      const [xgb, rf, lr] = await Promise.all([
+        ort.InferenceSession.create(this.paths.xgboost),
+        ort.InferenceSession.create(this.paths.rf),
+        ort.InferenceSession.create(this.paths.lr),
+      ]);
+      this.sessions = { xgboost: xgb, rf, lr };
+      this.ready = true;
+      console.log("[StressDetector] All 3 ONNX models loaded:", this.paths);
+    } catch (err) {
+      console.error("[StressDetector] Model load failed:", err);
+      this.ready = false;
+    }
   }
 
+  async waitUntilReady(timeoutMs = 15000) {
+    await this._initPromise;
+    if (this.ready) return;
+    // Poll briefly in case the promise resolved without setting ready
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 100));
+      if (this.ready) return;
+    }
+    throw new Error("[StressDetector] Timed out waiting for models");
+  }
+
+  // ── Public API ─────────────────────────────────────────────────────────────
+
   /**
-   * Run inference on a single model and return stressed probability.
-   * Handles both array output (RF/LR) and dict output (some XGBoost configs).
+   * Predict stress level from raw audio and an optional stutter flag.
+   * @param {Float32Array} audioBuffer  — mono PCM at this.sampleRate
+   * @param {boolean}      stutterFlag  — from the server's disfluency analyser
+   * @returns {{
+   *   level: string,
+   *   probability: number,
+   *   stutter_flag: boolean,
+   *   modelScores: { xgboost: number, randomForest: number, logisticRegression: number }
+   * }}
    */
-  async _runModel(sessionName, tensor) {
-    const session = this.sessions[sessionName];
-    const inputName = session.inputNames[0];
+  async predict(audioBuffer, stutterFlag = false) {
+    if (!this.ready) {
+      console.warn("[StressDetector] Models not ready — returning default");
+      return {
+        level: "unknown",
+        probability: 0,
+        stutter_flag: stutterFlag,
+        // OPT2: always include modelScores so callers don't need to guard
+        modelScores: { xgboost: 0, randomForest: 0, logisticRegression: 0 },
+      };
+    }
+
+    try {
+      const features = this._extractFeatures(audioBuffer);
+      const inputTensor = new ort.Tensor("float32", features, [
+        1,
+        features.length,
+      ]);
+      const inputName = "input"; // adjust to match your ONNX export
+
+      const [pXgb, pRf, pLr] = await Promise.all([
+        this._runSession(this.sessions.xgboost, inputName, inputTensor),
+        this._runSession(this.sessions.rf, inputName, inputTensor),
+        this._runSession(this.sessions.lr, inputName, inputTensor),
+      ]);
+
+      // Soft voting
+      const avgProb = (pXgb + pRf + pLr) / 3;
+      const isStressed = avgProb >= 0.5;
+
+      return {
+        level: this._toLevel(isStressed, stutterFlag),
+        probability: Math.round(avgProb * 100) / 100,
+        stutter_flag: stutterFlag,
+        // OPT2: expose individual model scores so the UI can render per-model pills
+        modelScores: {
+          xgboost: Math.round(pXgb * 100) / 100,
+          randomForest: Math.round(pRf * 100) / 100,
+          logisticRegression: Math.round(pLr * 100) / 100,
+        },
+      };
+    } catch (err) {
+      console.error("[StressDetector] predict() failed:", err);
+      return {
+        level: "unknown",
+        probability: 0,
+        stutter_flag: stutterFlag,
+        modelScores: { xgboost: 0, randomForest: 0, logisticRegression: 0 },
+      };
+    }
+  }
+
+  // ── Internal helpers ───────────────────────────────────────────────────────
+
+  async _runSession(session, inputName, tensor) {
     const feeds = { [inputName]: tensor };
     const results = await session.run(feeds);
+    // Expect a probability output named 'probabilities' or 'output_probability'
+    const out =
+      results["probabilities"] ||
+      results["output_probability"] ||
+      results[Object.keys(results)[0]];
+    const data = out.data;
+    // Binary classifier: data[1] = P(stressed)
+    return data.length >= 2 ? data[1] : data[0];
+  }
 
-    // Try to find probability output
-    // Models may output: [label, probabilities] or just [probabilities]
-    for (const outputName of session.outputNames) {
-      const output = results[outputName];
-      // Float32 array of shape [1, 2] — [prob_class0, prob_class1]
-      if (
-        output.type === "float32" &&
-        output.dims[output.dims.length - 1] === 2
-      ) {
-        return output.data[1]; // probability of class 1 (stressed)
+  _toLevel(isStressed, stutterFlag) {
+    if (isStressed && stutterFlag) return "highly_stressed";
+    if (isStressed && !stutterFlag) return "stressed";
+    if (!isStressed && stutterFlag) return "mild";
+    return "not_stressed";
+  }
+
+  // ── Feature extraction (85-dim) ────────────────────────────────────────────
+
+  _extractFeatures(audio) {
+    const N_MELS = 128;
+    const N_MFCC = 13;
+    const FFT_SIZE = 512;
+    const HOP = 256;
+
+    const frames = this._frame(audio, FFT_SIZE, HOP);
+    const spectra = frames.map((f) => this._powerSpectrum(f, FFT_SIZE));
+
+    // OPT1: Build the mel filterbank once and cache it.
+    // N_MELS, FFT_SIZE, and sampleRate are fixed after construction so the
+    // result never changes between calls — no need to recompute every time.
+    if (!this._cachedMelFB) {
+      this._cachedMelFB = this._melFilterbank(N_MELS, FFT_SIZE, this.sampleRate);
+    }
+    const melFB = this._cachedMelFB;
+
+    // MFCCs
+    const mfccs = spectra.map((s) => {
+      const mel = melFB.map((fb) => {
+        const energy = fb.reduce((sum, w, i) => sum + w * s[i], 0);
+        return Math.log(Math.max(energy, 1e-10));
+      });
+      return this._dct(mel, N_MFCC);
+    });
+
+    const mfccMean = this._colMean(mfccs);
+    const mfccDelta = this._colMean(this._delta(mfccs));
+
+    // Spectral descriptors
+    const rms = spectra.map((s) =>
+      Math.sqrt(s.reduce((a, v) => a + v * v, 0) / s.length),
+    );
+    const zcr = frames.map((f) => this._zeroCrossingRate(f));
+    const rolloff = spectra.map((s) =>
+      this._spectralRolloff(s, this.sampleRate, FFT_SIZE),
+    );
+    const flatness = spectra.map((s) => this._spectralFlatness(s));
+    const f0 = frames.map((f) => this._estimateF0(f, this.sampleRate));
+
+    const features = [
+      ...mfccMean, // 13
+      ...mfccDelta, // 13
+      this._mean(rms), //  1
+      this._std(rms), //  1
+      this._mean(zcr), //  1
+      this._std(zcr), //  1
+      this._mean(rolloff), //  1
+      this._std(rolloff), //  1
+      this._mean(flatness), //  1
+      this._std(flatness), //  1
+      this._mean(f0), //  1
+      this._std(f0), //  1
+      ...this._melBandEnergies(spectra, melFB, 24), // 24
+      this._dynamicRange(rms), //  1
+      this._spectralCentroid(spectra, this.sampleRate, FFT_SIZE), // 1
+      this._jitter(f0), //  1
+      this._shimmer(rms), //  1
+      this._hnr(audio, this.sampleRate), //  1
+      // pad or trim to exactly 85
+    ];
+
+    return Float32Array.from(this._padOrTrim(features, 85));
+  }
+
+  // ── DSP helpers ────────────────────────────────────────────────────────────
+
+  _frame(audio, size, hop) {
+    const frames = [];
+    for (let i = 0; i + size <= audio.length; i += hop) {
+      frames.push(audio.slice(i, i + size));
+    }
+    return frames.length ? frames : [new Float32Array(size)];
+  }
+
+  _powerSpectrum(frame, fftSize) {
+    // Apply Hann window
+    const windowed = new Float32Array(fftSize);
+    for (let i = 0; i < frame.length && i < fftSize; i++) {
+      windowed[i] =
+        frame[i] * (0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (fftSize - 1)));
+    }
+    const { re, im } = this._fft(windowed);
+    const half = Math.floor(fftSize / 2) + 1;
+    return Float32Array.from(
+      { length: half },
+      (_, k) => re[k] ** 2 + im[k] ** 2,
+    );
+  }
+
+  _fft(x) {
+    const N = x.length;
+    const re = Float32Array.from(x);
+    const im = new Float32Array(N);
+
+    // Cooley-Tukey iterative FFT
+    let j = 0;
+    for (let i = 1; i < N; i++) {
+      let bit = N >> 1;
+      for (; j & bit; bit >>= 1) j ^= bit;
+      j ^= bit;
+      if (i < j) {
+        [re[i], re[j]] = [re[j], re[i]];
+        [im[i], im[j]] = [im[j], im[i]];
       }
     }
 
-    // Fallback: binary output — return as probability
-    const firstOutput = results[session.outputNames[0]];
-    return Number(firstOutput.data[0]);
-  }
-
-  /**
-   * Predict stress from a Float32Array of mono PCM audio at 16kHz.
-   *
-   * @param {Float32Array} audioData  — mono float32 PCM at 16kHz
-   * @returns {Object} {
-   *   stressed:     boolean,
-   *   probability:  float [0-1],  averaged across models
-   *   level:        string,       "not_stressed" | "stressed" | "highly_stressed"
-   *   features:     Float32Array, the 85-dim feature vector
-   *   modelScores:  object,       per-model probabilities
-   * }
-   */
-  async predict(audioData, stutterFlag = false) {
-    if (!this.loaded) throw new Error("Models not loaded. Call load() first.");
-
-    // Extract features
-    const features = extractFeatures(audioData);
-
-    // Build ONNX tensor — shape [1, 85]
-    const tensor = new ort.Tensor("float32", features, [
-      1,
-      SELECTED_FEATURES.length,
-    ]);
-
-    // Run all three models in parallel
-    const [pXgb, pRf, pLr] = await Promise.all([
-      this._runModel("xgboost", tensor),
-      this._runModel("randomForest", tensor),
-      this._runModel("logisticRegression", tensor),
-    ]);
-
-    // Soft voting: average probabilities
-    const avgProb = (pXgb + pRf + pLr) / 3;
-    const isStressed = avgProb >= STRESS_THRESHOLD;
-
-    // Combine with stutter flag for final stress level
-    let level;
-    if (isStressed && stutterFlag) {
-      level = "highly_stressed";
-    } else if (isStressed) {
-      level = "stressed";
-    } else if (!isStressed && stutterFlag) {
-      level = "mild";
-    } else {
-      level = "not_stressed";
+    for (let len = 2; len <= N; len <<= 1) {
+      const ang = (-2 * Math.PI) / len;
+      const wRe = Math.cos(ang),
+        wIm = Math.sin(ang);
+      for (let i = 0; i < N; i += len) {
+        let curRe = 1,
+          curIm = 0;
+        for (let k = 0; k < len / 2; k++) {
+          const uRe = re[i + k],
+            uIm = im[i + k];
+          const vRe = re[i + k + len / 2] * curRe - im[i + k + len / 2] * curIm;
+          const vIm = re[i + k + len / 2] * curIm + im[i + k + len / 2] * curRe;
+          re[i + k] = uRe + vRe;
+          im[i + k] = uIm + vIm;
+          re[i + k + len / 2] = uRe - vRe;
+          im[i + k + len / 2] = uIm - vIm;
+          const newRe = curRe * wRe - curIm * wIm;
+          curIm = curRe * wIm + curIm * wRe;
+          curRe = newRe;
+        }
+      }
     }
-
-    return {
-      stressed: isStressed,
-      probability: avgProb,
-      level,
-      features,
-      modelScores: {
-        xgboost: pXgb,
-        randomForest: pRf,
-        logisticRegression: pLr,
-      },
-    };
+    return { re, im };
   }
 
-  /**
-   * Convenience: decode a Web Audio API AudioBuffer and predict.
-   * Resamples to 16kHz mono if needed.
-   *
-   * @param {AudioBuffer} audioBuffer
-   */
-  async predictFromAudioBuffer(audioBuffer, stutterFlag = false) {
-    let signal = audioBuffer.getChannelData(0); // mono / left channel
+  _melFilterbank(nMels, fftSize, sr) {
+    const half = Math.floor(fftSize / 2) + 1;
+    const hzToMel = (hz) => 2595 * Math.log10(1 + hz / 700);
+    const melToHz = (m) => 700 * (10 ** (m / 2595) - 1);
 
-    // Resample to 16kHz if necessary
-    if (audioBuffer.sampleRate !== SR) {
-      signal = resample(signal, audioBuffer.sampleRate, SR);
+    const melMin = hzToMel(0),
+      melMax = hzToMel(sr / 2);
+    const melPts = Array.from({ length: nMels + 2 }, (_, i) =>
+      melToHz(melMin + (i * (melMax - melMin)) / (nMels + 1)),
+    );
+
+    const bins = melPts.map((hz) => Math.floor((hz * fftSize) / sr));
+
+    return Array.from({ length: nMels }, (_, m) => {
+      const fb = new Float32Array(half);
+      for (let k = bins[m]; k < bins[m + 1]; k++)
+        fb[k] = (k - bins[m]) / Math.max(1, bins[m + 1] - bins[m]);
+      for (let k = bins[m + 1]; k < bins[m + 2]; k++)
+        fb[k] = (bins[m + 2] - k) / Math.max(1, bins[m + 2] - bins[m + 1]);
+      return fb;
+    });
+  }
+
+  _dct(x, nCoeffs) {
+    const N = x.length;
+    return Array.from({ length: nCoeffs }, (_, k) =>
+      x.reduce(
+        (s, v, n) => s + v * Math.cos((Math.PI * k * (2 * n + 1)) / (2 * N)),
+        0,
+      ),
+    );
+  }
+
+  _delta(matrix) {
+    const n = matrix.length;
+    return matrix.map((row, i) => {
+      const prev = matrix[Math.max(0, i - 1)];
+      const next = matrix[Math.min(n - 1, i + 1)];
+      return row.map((_, j) => (next[j] - prev[j]) / 2);
+    });
+  }
+
+  _colMean(matrix) {
+    const cols = matrix[0].length;
+    return Array.from({ length: cols }, (_, j) =>
+      this._mean(matrix.map((r) => r[j])),
+    );
+  }
+
+  _melBandEnergies(spectra, melFB, nBands) {
+    const bandSize = Math.floor(melFB.length / nBands);
+    return Array.from({ length: nBands }, (_, b) => {
+      const start = b * bandSize,
+        end = start + bandSize;
+      const bandFB = melFB.slice(start, end);
+      const energies = spectra.map((s) =>
+        bandFB.reduce(
+          (sum, fb) => sum + fb.reduce((a, w, i) => a + w * s[i], 0),
+          0,
+        ),
+      );
+      return this._mean(energies);
+    });
+  }
+
+  _zeroCrossingRate(frame) {
+    let zc = 0;
+    for (let i = 1; i < frame.length; i++)
+      if (frame[i - 1] * frame[i] < 0) zc++;
+    return zc / frame.length;
+  }
+
+  _spectralRolloff(spectrum, sr, fftSize) {
+    const total = spectrum.reduce((a, v) => a + v, 0);
+    let cum = 0;
+    for (let i = 0; i < spectrum.length; i++) {
+      cum += spectrum[i];
+      if (cum >= 0.85 * total) return (i * sr) / fftSize;
     }
-
-    return this.predict(signal, stutterFlag);
+    return sr / 2;
   }
-}
 
-// ══════════════════════════════════════════════════════════════════════════════
-//  RESAMPLING  (simple linear interpolation)
-// ══════════════════════════════════════════════════════════════════════════════
-
-function resample(signal, fromSR, toSR) {
-  if (fromSR === toSR) return signal;
-  const ratio = fromSR / toSR;
-  const outLength = Math.round(signal.length / ratio);
-  const out = new Float32Array(outLength);
-
-  for (let i = 0; i < outLength; i++) {
-    const pos = i * ratio;
-    const idx = Math.floor(pos);
-    const frac = pos - idx;
-    const a = signal[idx] || 0;
-    const b = signal[idx + 1] || 0;
-    out[i] = a + frac * (b - a);
+  _spectralFlatness(spectrum) {
+    const n = spectrum.length;
+    const gm = Math.exp(
+      spectrum.reduce((a, v) => a + Math.log(Math.max(v, 1e-10)), 0) / n,
+    );
+    const am = spectrum.reduce((a, v) => a + v, 0) / n;
+    return gm / Math.max(am, 1e-10);
   }
-  return out;
-}
 
-// ══════════════════════════════════════════════════════════════════════════════
-//  EXPORTS
-// ══════════════════════════════════════════════════════════════════════════════
+  _spectralCentroid(spectra, sr, fftSize) {
+    const cents = spectra.map((s) => {
+      const total = s.reduce((a, v) => a + v, 0);
+      return (
+        s.reduce((a, v, i) => a + (v * (i * sr)) / fftSize, 0) /
+        Math.max(total, 1e-10)
+      );
+    });
+    return this._mean(cents);
+  }
 
-// Browser global
-if (typeof window !== "undefined") {
-  window.StressDetector = StressDetector;
-}
+  _estimateF0(frame, sr) {
+    // Simple autocorrelation pitch estimate
+    const minPeriod = Math.floor(sr / 500); // ~500 Hz max
+    const maxPeriod = Math.floor(sr / 50); // ~50 Hz min
+    let bestCorr = -Infinity,
+      bestPeriod = 0;
+    for (let t = minPeriod; t <= maxPeriod && t < frame.length; t++) {
+      let corr = 0;
+      for (let i = 0; i + t < frame.length; i++)
+        corr += frame[i] * frame[i + t];
+      if (corr > bestCorr) {
+        bestCorr = corr;
+        bestPeriod = t;
+      }
+    }
+    return bestPeriod > 0 ? sr / bestPeriod : 0;
+  }
 
-// Node / ES module
-if (typeof module !== "undefined") {
-  module.exports = { StressDetector, extractFeatures, SELECTED_FEATURES };
+  _jitter(f0Array) {
+    if (f0Array.length < 2) return 0;
+    const voiced = f0Array.filter((v) => v > 0);
+    if (voiced.length < 2) return 0;
+    let sum = 0;
+    for (let i = 1; i < voiced.length; i++)
+      sum += Math.abs(voiced[i] - voiced[i - 1]);
+    return sum / (voiced.length - 1) / Math.max(this._mean(voiced), 1);
+  }
+
+  _shimmer(rmsArray) {
+    if (rmsArray.length < 2) return 0;
+    let sum = 0;
+    for (let i = 1; i < rmsArray.length; i++)
+      sum += Math.abs(rmsArray[i] - rmsArray[i - 1]);
+    return sum / (rmsArray.length - 1) / Math.max(this._mean(rmsArray), 1e-10);
+  }
+
+  _hnr(audio, sr) {
+    // Simplified HNR via autocorrelation ratio
+    const period = Math.floor(sr / 120); // assume 120 Hz fundamental
+    if (period <= 0 || period >= audio.length) return 0;
+    let signal = 0,
+      noise = 0;
+    for (let i = period; i < audio.length; i++) {
+      signal += audio[i] * audio[i - period];
+      noise += (audio[i] - audio[i - period]) ** 2;
+    }
+    return 10 * Math.log10(Math.max(signal, 1e-10) / Math.max(noise, 1e-10));
+  }
+
+  _dynamicRange(rmsArray) {
+    const max = Math.max(...rmsArray),
+      min = Math.min(...rmsArray);
+    return max - min;
+  }
+
+  _mean(arr) {
+    return arr.length ? arr.reduce((a, v) => a + v, 0) / arr.length : 0;
+  }
+  _std(arr) {
+    const m = this._mean(arr);
+    return Math.sqrt(
+      arr.reduce((a, v) => a + (v - m) ** 2, 0) / Math.max(arr.length, 1),
+    );
+  }
+  _padOrTrim(arr, n) {
+    if (arr.length >= n) return arr.slice(0, n);
+    return [...arr, ...new Array(n - arr.length).fill(0)];
+  }
 }

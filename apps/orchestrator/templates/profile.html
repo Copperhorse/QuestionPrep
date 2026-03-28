@@ -3,274 +3,210 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Dashboard — QuestionPrep</title>
+        <title>QuestionPrep — Profile</title>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link
-            href="https://fonts.googleapis.com/css2?family=Cormorant:ital,wght@0,300;0,400;1,300;1,400&family=Inter:wght@400;500;600&family=Lora:ital,wght@0,400;0,500;1,400;1,500&display=swap"
+            href="https://fonts.googleapis.com/css2?family=Cormorant:ital,wght@0,300;0,400;1,300&family=Inter:wght@400;500;600&family=Lora:ital,wght@0,400;1,400&display=swap"
             rel="stylesheet"
         />
         <link rel="stylesheet" href="/static/css/styles.css" />
+        <script
+            src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"
+            defer
+        ></script>
     </head>
     <body>
-        <!-- ── Navigation ── -->
         <nav class="site-nav">
             <div class="container">
                 <a href="/" class="nav-brand">QuestionPrep</a>
                 <div class="nav-links">
-                    <span
-                        style="
-                            font-size: 0.88rem;
-                            color: var(--ink-very-light);
-                            font-style: italic;
-                            font-family: &quot;Lora&quot;, serif;
-                        "
-                        >My Dashboard</span
-                    >
-                    <button
-                        class="btn btn-ghost btn-sm"
-                        onclick="window.location.href='/login'"
-                    >
-                        <i data-lucide="log-out"></i> Sign out
+                    <a href="/interview" class="btn btn-primary btn-sm">
+                        <i data-lucide="play" class="lucide"></i> Start
+                        Interview
+                    </a>
+                    <button class="btn btn-outline btn-sm" id="logout-btn">
+                        <i data-lucide="log-out" class="lucide"></i> Logout
                     </button>
                 </div>
             </div>
         </nav>
 
-        <!-- ── Page Hero ── -->
         <div class="page-hero">
             <div class="container">
-                <h1>My Dashboard</h1>
-                <p class="page-subtitle">
-                    Your documents, sessions, and progress — all in one place.
+                <p class="section-label">Your workspace</p>
+                <h1>Profile</h1>
+                <p class="page-subtitle" id="profile-greeting">
+                    Loading your profile…
                 </p>
             </div>
         </div>
 
-        <!-- ── Main Content ── -->
-        <section class="page-section">
+        <div class="page-section">
             <div class="container">
-                <!-- Tabs -->
-                <div class="tabs">
-                    <button
-                        class="tab-btn active"
-                        onclick="switchTab('profile', this)"
-                    >
-                        <i data-lucide="user"></i> Profile
-                    </button>
-                    <button class="tab-btn" onclick="switchTab('files', this)">
-                        <i data-lucide="folder-open"></i> My Files
-                    </button>
-                </div>
+                <!-- Upload section -->
+                <div style="margin-bottom: 3rem">
+                    <h2>Upload a Document</h2>
+                    <p style="margin-bottom: 1.5rem; max-width: 55ch">
+                        Upload a PDF — lecture notes, a textbook chapter, a
+                        research paper. QuestionPrep will extract and generate
+                        interview questions from it.
+                    </p>
 
-                <!-- ── Profile Tab ── -->
-                <div id="profile" class="tab-content active">
-                    <div class="card" style="max-width: 480px">
-                        <div class="card-header">Student Profile</div>
-
-                        <div
-                            style="
-                                display: flex;
-                                align-items: center;
-                                gap: 1.2rem;
-                                margin-bottom: 1.5rem;
-                            "
-                        >
-                            <div
+                    <!--
+                        OPT5: Drag-and-drop upload zone.
+                        The entire box is a drop target. The file input and
+                        upload button remain functional as before. app.js
+                        listens for dragenter / dragover / dragleave / drop
+                        events on #upload-drop-zone and routes dropped files
+                        through the shared uploadFile() function.
+                    -->
+                    <div id="upload-drop-zone" class="upload-drop-zone">
+                        <div class="upload-drop-icon">
+                            <i
+                                data-lucide="upload-cloud"
                                 style="
-                                    width: 52px;
-                                    height: 52px;
-                                    border-radius: 50%;
-                                    background: rgba(201, 127, 62, 0.12);
-                                    border: 1px solid var(--border);
-                                    display: flex;
-                                    align-items: center;
-                                    justify-content: center;
+                                    width: 28px;
+                                    height: 28px;
                                     color: var(--warm);
                                 "
-                            >
-                                <i data-lucide="user" class="icon-xl"></i>
-                            </div>
-                            <div>
-                                <div
-                                    style="
-                                        font-family:
-                                            &quot;Lora&quot;, Georgia, serif;
-                                        font-size: 1.05rem;
-                                        color: var(--ink);
-                                    "
-                                >
-                                    Student
-                                </div>
-                                <div
-                                    style="
-                                        font-size: 0.82rem;
-                                        color: var(--ink-very-light);
-                                        font-style: italic;
-                                        font-family: &quot;Lora&quot;, serif;
-                                    "
-                                >
-                                    Ready to practice
-                                </div>
-                            </div>
+                            ></i>
                         </div>
-
-                        <div class="alert alert-info">
-                            <i data-lucide="info"></i>
-                            <span
-                                >Upload a PDF in <strong>My Files</strong>,
-                                generate questions, then start an interview
-                                session.</span
-                            >
-                        </div>
-
-                        <div
-                            style="
-                                margin-top: 1.5rem;
-                                display: flex;
-                                gap: 0.75rem;
-                            "
-                        >
-                            <button class="btn btn-outline btn-sm">
-                                <i data-lucide="pencil"></i> Edit Profile
+                        <p class="upload-drop-hint">
+                            Drag a PDF here, or use the controls below
+                        </p>
+                        <div class="upload-controls">
+                            <input
+                                type="file"
+                                id="pdf-upload"
+                                accept=".pdf"
+                                style="
+                                    font-size: 0.9rem;
+                                    padding: 0.5rem;
+                                    border: 1px solid var(--border);
+                                    border-radius: 6px;
+                                    background: var(--paper-light);
+                                    color: var(--ink-light);
+                                "
+                            />
+                            <button class="btn btn-primary" id="upload-btn">
+                                <i data-lucide="upload" class="lucide"></i>
+                                Upload &amp; Ingest
                             </button>
-                            <a href="/interview" class="btn btn-primary btn-sm">
-                                <i data-lucide="play"></i> Start Interview
-                            </a>
                         </div>
                     </div>
                 </div>
 
-                <!-- ── Files Tab ── -->
-                <div id="files" class="tab-content">
-                    <!-- Upload row -->
-                    <div class="card" style="margin-bottom: 2rem">
-                        <div class="card-header">Upload a document</div>
-                        <p style="margin-bottom: 1.2rem; font-size: 0.9rem">
-                            Upload a PDF (study notes, research papers and
-                            textbooks) and QuestionPrep will generate tailored
-                            interview questions from it. Please make sure to not
-                            upload anything heavy as the current system is not
-                            capable of supporting it.
-                        </p>
+                <!-- Files section -->
+                <div>
+                    <h2>Your Files</h2>
+                    <p style="margin-bottom: 1.5rem; max-width: 55ch">
+                        Once a file is ingested, click
+                        <strong>Generate Questions</strong> to run the
+                        enrichment pipeline. This can take a few minutes.
+                    </p>
+
+                    <!--
+                        B23 FIX: Hardcoded static .file-card placeholder divs
+                        removed. The skeleton loader below is replaced by real
+                        cards when fetchUserFiles() resolves.
+                    -->
+                    <div
+                        class="grid"
+                        id="files-grid"
+                        style="
+                            grid-template-columns: repeat(
+                                auto-fill,
+                                minmax(280px, 1fr)
+                            );
+                        "
+                    >
+                        <!-- Skeleton shown while JS loads real data -->
                         <div
+                            id="files-skeleton"
                             style="
+                                grid-column: 1/-1;
                                 display: flex;
+                                flex-direction: column;
                                 gap: 0.75rem;
-                                align-items: center;
-                                flex-wrap: wrap;
                             "
                         >
-                            <label
-                                style="
-                                    display: flex;
-                                    align-items: center;
-                                    gap: 0.6rem;
-                                    cursor: pointer;
-                                    flex: 1;
-                                    min-width: 200px;
-                                "
-                            >
-                                <i
-                                    data-lucide="file-text"
-                                    style="color: var(--warm); flex-shrink: 0"
-                                ></i>
-                                <input
-                                    type="file"
-                                    id="pdf-upload"
-                                    accept=".pdf"
-                                    style="
-                                        font-size: 0.88rem;
-                                        border: none;
-                                        background: transparent;
-                                        padding: 0;
-                                        margin: 0;
-                                        width: 100%;
-                                        cursor: pointer;
-                                    "
-                                />
-                            </label>
-                            <button
-                                id="upload-btn"
-                                class="btn btn-primary btn-sm"
-                            >
-                                <i data-lucide="upload"></i> Upload PDF
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- Files grid -->
-                    <div class="grid" id="files-grid">
-                        <!-- Populated by app.js — static placeholders shown before JS runs -->
-                        <div class="file-card">
-                            <div class="file-card-title">System Design.pdf</div>
-                            <div class="file-card-meta">Status: Ready</div>
-                            <div class="file-card-actions">
-                                <a
-                                    href="/interview"
-                                    class="btn btn-primary btn-sm"
-                                >
-                                    <i data-lucide="play"></i> Start Interview
-                                    Session
-                                </a>
-                            </div>
-                        </div>
-
-                        <div class="file-card">
-                            <div class="file-card-title">
-                                Data Structures.pdf
-                            </div>
                             <div
-                                class="file-card-meta"
                                 style="
-                                    display: flex;
-                                    align-items: center;
-                                    gap: 0.4rem;
+                                    height: 120px;
+                                    background: var(--paper-deep);
+                                    border-radius: 8px;
+                                    animation: pulse 1.4s ease-in-out infinite;
                                 "
-                            >
-                                <i
-                                    data-lucide="loader"
-                                    style="
-                                        width: 13px;
-                                        height: 13px;
-                                        color: var(--warning);
-                                    "
-                                ></i>
-                                Indexing in background…
-                            </div>
-                            <div class="file-card-actions">
-                                <button
-                                    class="btn btn-outline btn-sm"
-                                    disabled
-                                    style="opacity: 0.5; cursor: not-allowed"
-                                >
-                                    <i data-lucide="clock"></i> Processing
-                                </button>
-                            </div>
+                            ></div>
+                            <div
+                                style="
+                                    height: 120px;
+                                    background: var(--paper-deep);
+                                    border-radius: 8px;
+                                    animation: pulse 1.4s ease-in-out infinite;
+                                    animation-delay: 0.2s;
+                                "
+                            ></div>
                         </div>
                     </div>
                 </div>
             </div>
-        </section>
+        </div>
 
-        <script>
-            function switchTab(tabId, btn) {
-                document
-                    .querySelectorAll(".tab-content")
-                    .forEach((c) => c.classList.remove("active"));
-                document
-                    .querySelectorAll(".tab-btn")
-                    .forEach((b) => b.classList.remove("active"));
-                document.getElementById(tabId).classList.add("active");
-                btn.classList.add("active");
-                lucide.createIcons();
+        <footer>
+            <div class="footer-content">
+                <span>QuestionPrep — study smarter.</span>
+            </div>
+        </footer>
+
+        <style>
+            @keyframes pulse {
+                0%,
+                100% {
+                    opacity: 1;
+                }
+                50% {
+                    opacity: 0.5;
+                }
             }
-        </script>
+        </style>
 
-        <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
         <script src="/static/js/app.js"></script>
+        <script src="/static/js/status-panel.js" defer></script>
         <script>
-            lucide.createIcons();
+            document.addEventListener("DOMContentLoaded", async () => {
+                const userId = localStorage.getItem("qp_user_id");
+                if (!userId) {
+                    window.location.href = "/login";
+                    return;
+                }
+
+                try {
+                    const res = await fetch(
+                        `/api/auth/profile?user_id=${userId}`,
+                    );
+                    if (res.ok) {
+                        const data = await res.json();
+                        const username = data.profile?.username || "there";
+                        document.getElementById(
+                            "profile-greeting",
+                        ).textContent =
+                            `Welcome back, ${username}. Manage your study materials below.`;
+                    }
+                } catch (_) {}
+
+                lucide.createIcons();
+            });
+
+            document
+                .getElementById("logout-btn")
+                ?.addEventListener("click", () => {
+                    localStorage.removeItem("qp_user_id");
+                    localStorage.removeItem("qp_token");
+                    localStorage.removeItem("qp_session_id");
+                    window.location.href = "/login";
+                });
         </script>
     </body>
 </html>

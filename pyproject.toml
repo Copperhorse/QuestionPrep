@@ -8,10 +8,13 @@ dependencies = [
     "datasets>=4.5.0",
     "docling>=2.71.0",
     "faster-whisper>=1.2.1",
-        "qp-core",
-        "qp-pipeline",
-        "qp-voice",
-        "qp_notebooks"
+    "passlib[bcrypt]>=1.7.4",
+    "python-jose[cryptography]>=3.5.0",
+    "qp-core",
+    "qp-pipeline",
+    "qp-voice",
+    "qp_notebooks",
+    "slowapi>=0.1.9",
 ]
 
 [tool.uv.workspace]

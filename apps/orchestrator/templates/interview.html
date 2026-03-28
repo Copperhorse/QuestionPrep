@@ -172,15 +172,39 @@
             let audioChunks = [];
 
             // ── Stress detector — load models in background ───────────────────
+            //
+            // FIX: Three bugs corrected here:
+            //
+            //  1. Constructor key names were wrong.  StressDetector expects
+            //     { xgboostPath, rfPath, lrPath } but the original code passed
+            //     { xgboost, randomForest, logisticRegression }.  Wrong keys are
+            //     silently ignored and the class falls back to its default paths,
+            //     so any path customisation here was a no-op.
+            //
+            //  2. detector.load() was called after construction.  StressDetector
+            //     has no .load() method — models are loaded automatically inside
+            //     the constructor via this._initPromise.  The erroneous call
+            //     threw "TypeError: detector.load is not a function", which the
+            //     catch block turned into detector = null, silently disabling all
+            //     stress analysis on every page load.
+            //
+            //  3. showStressBanner() referenced stressResult.modelScores which
+            //     predict() never returned, causing a TypeError when displaying
+            //     the per-model pill badges.  stress-detector.js now includes
+            //     modelScores in every return value (including error paths).
             let detector = null;
             if (window.StressDetector) {
+                // FIX 1: use the correct constructor key names
                 detector = new window.StressDetector({
-                    xgboost: "/static/models/xgboost.onnx",
-                    randomForest: "/static/models/random_forest.onnx",
-                    logisticRegression:
-                        "/static/models/logistic_regression.onnx",
+                    xgboostPath: "/static/models/xgboost.onnx",
+                    rfPath: "/static/models/random_forest.onnx",
+                    lrPath: "/static/models/logistic_regression.onnx",
                 });
-                detector.load().catch((err) => {
+                // FIX 2: models load via _initPromise in the constructor —
+                // there is no .load() method.  Attach the failure handler to
+                // _initPromise directly so we still disable the detector if the
+                // ONNX files cannot be fetched.
+                detector._initPromise.catch((err) => {
                     console.warn(
                         "[StressDetector] Model load failed — stress analysis disabled.",
                         err,
@@ -236,11 +260,15 @@
                 stressBanner.style.display = "block";
 
                 if (details && level !== "analyzing") {
+                    // FIX 3: stress-detector.js now always returns modelScores so
+                    // this block is safe.  Previously modelScores was undefined,
+                    // causing a TypeError on .xgboost / .randomForest / .logisticRegression.
+                    const scores = details.modelScores || {};
                     stressDetails.innerHTML = `
             <span class="stress-pill">Probability: ${(details.probability * 100).toFixed(0)}%</span>
-            <span class="stress-pill">XGB: ${(details.modelScores.xgboost * 100).toFixed(0)}%</span>
-            <span class="stress-pill">RF: ${(details.modelScores.randomForest * 100).toFixed(0)}%</span>
-            <span class="stress-pill">LR: ${(details.modelScores.logisticRegression * 100).toFixed(0)}%</span>
+            <span class="stress-pill">XGB: ${((scores.xgboost ?? 0) * 100).toFixed(0)}%</span>
+            <span class="stress-pill">RF: ${((scores.randomForest ?? 0) * 100).toFixed(0)}%</span>
+            <span class="stress-pill">LR: ${((scores.logisticRegression ?? 0) * 100).toFixed(0)}%</span>
             ${details.stutterFlag ? '<span class="stress-pill">Disfluency detected</span>' : ""}
           `;
                     stressDetails.style.display = "flex";
@@ -301,6 +329,7 @@
                     );
                     showStressBanner(stressResult.level, {
                         probability: stressResult.probability,
+                        // FIX 3: modelScores is now always present in stressResult
                         modelScores: stressResult.modelScores,
                         stutterFlag: serverResult.stutter_flag,
                     });
@@ -381,6 +410,7 @@
         </script>
 
         <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+        <script src="/static/js/status-panel.js" defer></script>
         <script>
             lucide.createIcons();
         </script>

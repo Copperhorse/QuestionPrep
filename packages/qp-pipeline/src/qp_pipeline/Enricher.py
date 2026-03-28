@@ -1,23 +1,6 @@
 """
-Enricher.py - Production-Grade Enrichment Pipeline (Optimized Two-Pass)
+Enricher.py — Production-Grade Enrichment Pipeline (Optimized Two-Pass)
 
-This module implements an optimized two-pass enrichment pipeline for extracting
-high-quality question-answer (QA) pairs and metadata from text "chunks".
-It is designed to be robust and practical for production use.
-
-Changelog vs original:
-- [LFM] Added top_k=50 and repetition_penalty=1.05 to all API calls (official LFM2.5-1.2B-Instruct settings)
-- [LFM] Removed response_format JSON flag; replaced with assistant-role prefill (more reliable on small models)
-- [PROMPT] Metadata sys_prompt: Chain-of-Draft reasoning style + self-termination instruction
-- [PROMPT] Pass 1 sys_prompt: Chain-of-Draft + commit-on-first-confidence instruction
-- [PROMPT] Pass 2 sys_prompt: Chain-of-Draft + write-immediately-and-stop instruction
-- [PROMPT] Summary prompt: declared purpose, content-type branching, no meta-commentary framing
-- [MATH] Math-specific difficulty instructions (definition/computation/derivation axis)
-- [MATH] Math quote guard: exact substring check instead of fragile fuzzy match
-- [TAG] _verify_tags_grounded: post-generation check that each tag appears in chunk text
-- [TRIPLET] _verify_triplets_grounded: checks subject and object appear in chunk text
-- [VALIDATOR] Removed "by" from causal set (too generic, causes false passes)
-- [HISTORY] Summary deflection check + min-length gate before appending to deque
 """
 
 import json
@@ -25,12 +8,12 @@ import logging
 import os
 import re
 import sys
-from collections import deque
+from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Deque, Dict, List, Optional, Set, Tuple
 
-# External deps
+from json_repair import repair_json
 from openai import OpenAI
 from rapidfuzz import fuzz
 from rich.console import Console
@@ -49,7 +32,6 @@ else:
 if str(project_root) not in sys.path:
     sys.path.append(str(project_root))
 
-# Paths
 DB_PATH = str(project_root / "data" / "rag_staging.db")
 CHROMA_DIR = str(project_root / "data" / "chroma_store")
 
@@ -65,12 +47,15 @@ except ImportError:
 LLAMA_API_URL = "http://localhost:8080/v1"
 MODEL_NAME = "lfm-2.5-1.2b"
 
-MAX_WORKERS = 4
-QUOTE_MATCH_THRESHOLD = 75.0
+# B21: Was 4. llama-server processes exactly one request at a time, so multiple
+# workers only add thread-switching overhead. Set to 1 for sequential processing.
+MAX_WORKERS = 1
+
+QUOTE_MATCH_THRESHOLD = 70.0
 DEDUP_SIMILARITY_THRESHOLD = 80
 MIN_TOKENS_FOR_METADATA = 30
 MIN_TOKENS_FOR_QA = 30
-MIN_SUMMARY_TOKENS = 10  # [NEW] summaries shorter than this are treated as failures
+MIN_SUMMARY_TOKENS = 10
 
 DIFFICULTY_TYPE = {
     "Easy": "Fact",
@@ -78,7 +63,6 @@ DIFFICULTY_TYPE = {
     "Hard": "Critical",
 }
 
-# ---------------- DEFLECTION PATTERN ----------------
 DEFLECTION_PATTERN = re.compile(
     r"the\s+text\s+does\s+not\s+"
     r"(specify|mention|state|provide|include|address|discuss|indicate|describe)"
@@ -89,7 +73,6 @@ DEFLECTION_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# ---------------- RICH LOGGING ----------------
 console = Console()
 logging.basicConfig(
     level=logging.INFO,
@@ -100,15 +83,74 @@ logging.basicConfig(
 logger = logging.getLogger("Enricher")
 
 
-# ---------------- QUESTION LIMITS ----------------
+QUOTE_MIN_CHARS = 40  # require substantive quotes
+
+
+def _quote_is_grounded(quote: str, content: str) -> tuple[bool, str]:
+    """
+    Returns (is_grounded, reason).
+    Two-step check:
+      1. Minimum length — short quotes are not specific enough to be useful.
+      2. Exact or near-exact substring — the quote must appear in the content
+         with high fidelity (not just share common words).
+    """
+    quote = quote.strip()
+    if len(quote) < QUOTE_MIN_CHARS:
+        return False, f"Quote too short ({len(quote)} chars, min {QUOTE_MIN_CHARS})"
+
+    # Try exact first (fast)
+    if quote.lower() in content.lower():
+        return True, "exact"
+
+    # Fuzzy fallback for minor OCR/formatting differences
+    score = fuzz.partial_ratio(quote.lower(), content.lower())
+    if score >= QUOTE_MATCH_THRESHOLD:
+        return True, f"fuzzy ({score:.0f}%)"
+
+    return False, f"not found ({score:.0f}%)"
+
+
+def _content_words(t: str):
+    return {w.lower() for w in re.findall(r"[a-zA-Z]{4,}", t)}
+
+
+def _ensure_dict(value: Any) -> Dict[str, Any]:
+    """
+    Guarantee the return value is a dict.
+    - dict  → return as-is
+    - list of one dict → unwrap (model sometimes wraps in an array)
+    - anything else    → return {} so caller degrades gracefully
+    """
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, list) and len(value) == 1 and isinstance(value[0], dict):
+        logger.warning("JSON parsed as single-element list — unwrapping to dict")
+        return value[0]
+    if isinstance(value, list) and value:
+        logger.warning(
+            f"JSON parsed as list with {len(value)} elements — "
+            "expected a dict. Returning empty."
+        )
+    return {}
+
+
 def get_questions_per_difficulty(estimated_tokens: int) -> int:
-    return 1 if estimated_tokens < 80 else 3
+    """
+    Scale question quota to chunk size.
+    Asking for 9 questions (3 per difficulty) from an 80-token paragraph
+    forces the model to duplicate or hallucinate — small chunks get fewer.
+    """
+    if estimated_tokens < 80:
+        return 1  # ~60 words: one question per difficulty max
+    elif estimated_tokens < 200:
+        return 2  # medium chunk
+    else:
+        return 3  # large chunk only
 
 
-# ---------------- ANSWER VALIDATOR ----------------
 class AnswerValidator:
-    SIMILARITY_THRESHOLD = 0.52
-    LEXICAL_OVERLAP_THRESHOLD = 0.25
+    SIMILARITY_THRESHOLD = 0.55
+    LEXICAL_OVERLAP_THRESHOLD = 0.75
     MIN_SENTENCES = 1
     MAX_SENTENCES = 5
 
@@ -138,9 +180,6 @@ class AnswerValidator:
             return False, f"Lexical fail: overlap={overlap:.3f}"
 
         if question.strip().lower().startswith(("why", "how")):
-            # [FIX] Removed "by" — too generic, causes false passes on non-causal answers.
-            # e.g. "produced by the pipeline" or "answered by the document" would pass
-            # without explaining any mechanism. Kept only words with genuine causal signal.
             causal = {
                 "because",
                 "due to",
@@ -166,54 +205,37 @@ class AnswerValidator:
         return len([s for s in sentences if len(s) > 5])
 
     def _content_words(self, text: str) -> Set[str]:
-        tokens = re.findall(r"[a-zA-Z]{4,}|\d+[%a-zA-Z]*", text)
-        return {t.lower() for t in tokens}
+        return _content_words(text)
 
     def _structural_check(self, text: str) -> Tuple[bool, int]:
         count = self._sentence_count(text)
         return (self.MIN_SENTENCES <= count <= self.MAX_SENTENCES), count
 
 
-# ---------------- LLM CLIENT ----------------
 class LLMClient:
-    """
-    Encapsulates calls to the LLM backend.
-
-    Responsibilities:
-    - Provide helper to extract JSON safely from model output (robust to fences).
-    - Encapsulate prompts for metadata, question candidate generation (Pass 1),
-      and reference answer generation (Pass 2).
-    - Deduplicate near-identical questions produced across difficulty calls.
-    """
-
     def __init__(self, base_url: str, api_key: str = "no-key"):
         self.client = OpenAI(base_url=base_url, api_key=api_key)
 
     def _extract_json(self, text: str) -> Dict[str, Any]:
-        """
-        Robustly extract JSON object from LLM text.
+        """ """
 
-        First attempts strict json.loads (fastest, zero overhead for valid output).
-        On failure, falls back to json_repair which handles the most common LLM
-        pathology: unescaped double-quotes or newlines inside string values.
-        Strips ```json fences before either attempt.
-        """
-        from json_repair import repair_json
-
-        # Strip ```json ... ``` fences if present
-        fenced = re.search(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
+        # B17: greedy `.*` + re.DOTALL — captures full nested JSON from fenced blocks
+        fenced = re.search(r"```json\s*(\{.*\})\s*```", text, re.DOTALL)
         raw = fenced.group(1) if fenced else text
 
-        # Fast path — valid JSON
         try:
-            return json.loads(raw)
+            parsed = json.loads(raw)
+            result = _ensure_dict(parsed)
+            if result:
+                return result
+            # Fell through (was a list or unexpected type) — try repair below
         except json.JSONDecodeError:
             pass
 
-        # Slow path — let json_repair fix unescaped characters
         try:
-            result = repair_json(raw, return_objects=True)
-            if isinstance(result, dict):
+            repaired = repair_json(raw, return_objects=True)
+            result = _ensure_dict(repaired)
+            if result:
                 return result
         except Exception:
             pass
@@ -222,31 +244,34 @@ class LLMClient:
         return {}
 
     def _call_model(self, sys_prompt: str, user_prompt: str) -> Dict[str, Any]:
-        """
-        Wrapper for calling the LLM chat-completions endpoint.
-
-        Uses assistant-role prefill with '{' to force JSON output — more reliable
-        than response_format on a 1.2B model. Uses official LFM2.5-1.2B-Instruct
-        sampling settings: temperature=0.1, top_k=50, repetition_penalty=1.05.
-        top_p is intentionally omitted (only recommended for the Thinking variant).
-        """
         try:
             response = self.client.chat.completions.create(
                 model=MODEL_NAME,
                 messages=[
                     {"role": "system", "content": sys_prompt},
                     {"role": "user", "content": user_prompt},
-                    # [LFM] Prefill: forces the model into JSON mode without relying
-                    # on response_format, which may be ignored by small models.
                     {"role": "assistant", "content": "{"},
                 ],
-                temperature=0.1,  # [LFM] Official recommended value
-                top_k=50,  # [LFM] Official recommended value
-                repetition_penalty=1.05,  # [LFM] Official recommended value
-                # top_p intentionally omitted — only for LFM2.5-1.2B-Thinking
+                temperature=0.1,
+                # top_k and repetition_penalty are llama-server extensions —
+                # the OpenAI Python client rejects them as direct kwargs (TypeError).
+                # They must be forwarded via extra_body.
+                extra_body={
+                    "top_k": 50,
+                    "repetition_penalty": 1.05,
+                },
             )
-            # Re-attach the prefilled '{' that was injected via assistant role
-            raw_content = "{" + response.choices[0].message.content
+            content = response.choices[0].message.content
+
+            # B16: Some backends echo the assistant prefill back into the response.
+            # If the content already starts with '{', prepending another '{' produces
+            # '{{...}' which is invalid JSON. Check before prepending.
+            content_stripped = content.lstrip()
+            if content_stripped.startswith("{"):
+                raw_content = content_stripped
+            else:
+                raw_content = "{" + content
+
             return self._extract_json(raw_content)
         except Exception as e:
             logger.error(f"LLM Error: {e}")
@@ -254,27 +279,43 @@ class LLMClient:
 
     def _deduplicate_candidates(self, candidates: List[Dict]) -> List[Dict]:
         """
-        Remove near-duplicate questions using fuzzy token_sort_ratio.
+        Remove near-duplicate questions by checking both question text AND source quote.
 
-        token_sort_ratio handles reordered words well —
-        e.g. "Why does X cause Y?" vs "What causes Y in X?" would score high
-        on token_sort but not on plain ratio.
-
-        Two questions are considered duplicates if their score exceeds
-        DEDUP_SIMILARITY_THRESHOLD. The first occurrence is kept.
+        Two questions may have different wording but target the same sentence —
+        their answers would be nearly identical, so they're pedagogically redundant.
+        Quote-based dedup catches this second case.
         """
-        seen: List[str] = []
+        seen_qs: List[str] = []
+        seen_quotes: List[str] = []
         unique: List[Dict] = []
+
         for cand in candidates:
+            if not isinstance(cand, dict):
+                # LLM occasionally returns qa_pairs items as arrays instead of dicts.
+                # .get() on a list raises 'list has no attribute get'.
+                logger.debug(f"Candidate skipped (not a dict): {cand!r}")
+                continue
             q = cand.get("question", "").lower().strip()
+            quote = cand.get("source_quote", "").lower().strip()
             if not q:
                 continue
+
+            # Reject if question text is too similar to an existing one
             if any(
-                fuzz.token_sort_ratio(q, s) > DEDUP_SIMILARITY_THRESHOLD for s in seen
+                fuzz.token_sort_ratio(q, s) > DEDUP_SIMILARITY_THRESHOLD
+                for s in seen_qs
             ):
-                logger.debug(f"Deduped question: {q[:60]}")
+                logger.debug(f"Deduped question (text): {q[:60]}")
                 continue
-            seen.append(q)
+
+            # Reject if it targets the exact same sentence as an existing question
+            if quote and any(fuzz.partial_ratio(quote, sq) > 90 for sq in seen_quotes):
+                logger.debug(f"Deduped question (shared quote): {q[:60]}")
+                continue
+
+            seen_qs.append(q)
+            if quote:
+                seen_quotes.append(quote)
             unique.append(cand)
 
         removed = len(candidates) - len(unique)
@@ -284,30 +325,8 @@ class LLMClient:
 
     @staticmethod
     def _normalize_tags(tags: List[str]) -> List[str]:
-        """
-        Post-process tags into consistent, deduplicated snake_case format.
-
-        Normalisation steps:
-        1. Strip whitespace
-        2. Convert CamelCase and Title Case to lowercase_with_underscores
-        3. Remove tags on the generic blocklist
-        4. Deduplicate (preserving first-seen order)
-        """
         GENERIC_BLOCKLIST = {
-            "rag",
-            "nlp",
-            "llm",
-            "machine_learning",
-            "machinelearning",
-            "data_management",
-            "datamanagement",
-            "document_retrieval",
-            "documentretrieval",
-            "inference",
-            "inferencelogic",
-            "rag_framework",
-            "ragframework",
-            "preprocessing",
+            " ",
         }
 
         def _to_snake(tag: str) -> str:
@@ -322,10 +341,8 @@ class LLMClient:
                 continue
             normalised = _to_snake(raw)
             if normalised in GENERIC_BLOCKLIST:
-                logger.debug(f"Tag blocked (generic): {raw!r} → {normalised!r}")
                 continue
             if normalised in seen:
-                logger.debug(f"Tag deduplicated: {normalised!r}")
                 continue
             seen.add(normalised)
             result.append(normalised)
@@ -334,15 +351,6 @@ class LLMClient:
 
     @staticmethod
     def _verify_tags_grounded(tags: List[str], text: str) -> List[str]:
-        """
-        [NEW] Filter out tags that have no textual basis in the chunk.
-
-        _normalize_tags enforces format but never checks whether the concept
-        actually appears in the source text. This step catches hallucinated tags
-        that are thematically plausible but not grounded in the chunk content.
-
-        Checks both 'tag_with_underscores' and 'tag with spaces' forms.
-        """
         text_lower = text.lower()
         grounded = []
         for tag in tags:
@@ -358,17 +366,15 @@ class LLMClient:
 
     @staticmethod
     def _verify_triplets_grounded(triplets: List[Dict], text: str) -> List[Dict]:
-        """
-        [NEW] Filter out triplets whose subject or object cannot be found in the chunk.
-
-        Triplets have no validation in the original pipeline — a model can produce
-        plausible-sounding but hallucinated relationships on every chunk without any
-        rejection being logged. This check ensures both subject and object are
-        named entities that actually appear in the source text.
-        """
         text_lower = text.lower()
         grounded = []
         for t in triplets:
+            if not isinstance(t, dict):
+                # LLM occasionally returns triplets as [subj, pred, obj] arrays
+                # instead of {"subject": ..., "predicate": ..., "object": ...} dicts.
+                # Calling .get() on a list raises 'list has no attribute get' — skip.
+                logger.debug(f"Triplet skipped (not a dict): {t!r}")
+                continue
             subj = t.get("subject", "").lower().strip()
             obj = t.get("object", "").lower().strip()
             if subj and obj and subj in text_lower and obj in text_lower:
@@ -390,24 +396,14 @@ class LLMClient:
         text: str,
         context: str,
         estimated_tokens: int = 150,
-        content_type: str = "prose",  # [NEW] used for summary instruction branching
+        content_type: str = "prose",
     ) -> Dict[str, Any]:
-        """
-        Generate structured metadata for a text chunk.
-
-        Skips generation for chunks below MIN_TOKENS_FOR_METADATA.
-
-        Summary instruction is branched by content_type so the model produces
-        a purpose-appropriate summary rather than a generic table-of-contents entry.
-        Tags and triplets are grounded against the chunk text after generation.
-        """
         if estimated_tokens < MIN_TOKENS_FOR_METADATA:
             logger.warning(
                 f"Chunk too small ({estimated_tokens} tokens) — skipping metadata generation"
             )
             return {}
 
-        # [PROMPT] Chain-of-Draft + self-termination for metadata extraction
         sys_prompt = (
             "You are a precise Technical Knowledge Graph Extractor. "
             "If you reason before answering, keep each reasoning step to 5 words or fewer. "
@@ -417,81 +413,64 @@ class LLMClient:
             "Always output valid JSON following the exact schema provided."
         )
 
-        # [NEW] Content-type-specific summary instructions.
-        # Each variant declares the downstream purpose (history context for subsequent chunks)
-        # and prohibits meta-commentary framing ("this chunk discusses...").
+        # Improved summary instruction (forces direct, concise, non-repetitive summaries)
         summary_instruction = {
             "math": (
                 "1-2 sentences naming the formula or theorem and stating what it computes "
-                "or proves. Include the formula itself if it fits in one line. "
-                "Do not start with 'This chunk' or 'This section'."
+                "or proves. Include the formula itself if it fits in one line."
             ),
             "code": (
                 "1-2 sentences naming the function or class, describing its inputs, outputs, "
-                "and purpose. Do not start with 'This chunk' or 'This section'."
+                "and purpose."
             ),
             "table": (
-                "1-2 sentences stating what the table measures and the key values or ranges it contains. "
-                "Do not start with 'This chunk' or 'This section'."
+                "1-2 sentences stating what the table measures and the key values or ranges it contains."
             ),
         }.get(
             content_type,
-            # Default (prose): written for downstream model use as history context
             (
-                "2-3 sentences written for a downstream model that will use this as context. "
-                "Include: the main concept, any specific values or thresholds mentioned, "
-                "and how this chunk relates to the preceding context if relevant. "
-                "Do not use phrases like 'this chunk discusses' or 'this section covers'."
+                "Write exactly 2 complete sentences. "
+                "Sentence 1: state the core technical concept or claim. "
+                "Sentence 2: name the specific methods, techniques, or entities mentioned. "
+                "Never start with 'The text', 'This chunk', or 'This section'."
             ),
         )
 
         user_prompt = f"""
-### BACKGROUND CONTEXT (strictly for orientation — DO NOT extract tags, triplets, or
-### summary content from here; it describes a different part of the document):
-{context}
+   ### BACKGROUND CONTEXT (strictly for orientation — DO NOT extract tags, triplets, or summary from here):
+   {context}
 
-### TEXT CHUNK — THIS IS YOUR ONLY SOURCE:
-{text}
+   ### TEXT CHUNK — THIS IS YOUR ONLY SOURCE:
+   {text}
 
-### TASK:
-Analyse the TEXT CHUNK above and return ONLY this JSON structure.
+   ### TASK:
+   Analyse ONLY the TEXT CHUNK above and return EXACTLY this JSON structure.
 
-### STRICT RULES:
-1. Tags must be noun phrases that appear explicitly in the TEXT CHUNK.
-   DO NOT invent tags from the Background Context. There can be 5 tags at best and 1 tag at minimum.
-2. Every triplet subject and object must be an entity named in the TEXT CHUNK.
-3. Use lowercase_with_underscores for all tags (e.g. "heuristic_filtering", "common_crawl").
-4. Summary instruction: {summary_instruction}
+   ### STRICT RULES:
+   1. Tags: 2–5 noun phrases that appear explicitly in the TEXT CHUNK. Use lowercase_with_underscores.
+      Examples: "weak_labels", "gan_training", "entity_augmentation", "semi_supervised_learning".
+      Do not invent tags. Do not use generic tags like "data" or "machine_learning".
+   2. Triplets: Create meaningful subject-predicate-object triples where BOTH subject and object appear in the TEXT CHUNK.
+      Predicate must be a single verb or short verb phrase (e.g. "uses", "generates", "improves", "specializes_for").
+      Aim for 1–4 high-quality triplets. If none are meaningful, return an empty list.
+   3. Summary: Follow the instruction exactly. Be concise and factual.
 
-{{
-"summary": "...",
-"tags": ["Tag1", "Tag2"],
-"triplets": [
-    {{"subject": "Entity", "predicate": "predicate", "object": "Entity"}}
-]
-}}
-"""
+   {{
+   "summary": "[2-sentence factual summary]",
+   "tags": ["tag1", "tag2", ...],
+   "triplets": [
+       {{"subject": "Entity", "predicate": "verb_phrase", "object": "Entity"}}
+   ]
+   }}
+   """
+
         return self._call_model(sys_prompt, user_prompt)
 
-    # ====================== PASS 1 - PER-DIFFICULTY CALLS ======================
     def generate_question_candidates(self, chunk: Dict, context_str: str) -> List[Dict]:
-        """
-        Generate candidate questions and verbatim source quotes from the chunk.
-
-        Three separate LLM calls, one per difficulty level. Difficulty instructions
-        are branched by content_type so math chunks receive mathematically appropriate
-        difficulty axes (definition/computation/derivation) rather than prose axes
-        (recall/mechanism/critical).
-
-        After all three calls, near-duplicates are removed via _deduplicate_candidates.
-        """
         estimated_tokens = chunk.get("estimated_tokens", 150)
         per_diff = get_questions_per_difficulty(estimated_tokens)
         content_type = chunk.get("content_type", "prose")
 
-        # [NEW] Math-specific difficulty framing.
-        # Prose framing ("analytical / critical") produces vague meta-questions on math
-        # chunks. Math difficulty maps naturally to definition → computation → derivation.
         if content_type == "math":
             difficulty_instructions = {
                 "Easy": "definition or notation — ask what a symbol, term, or operator means",
@@ -505,14 +484,12 @@ Analyse the TEXT CHUNK above and return ONLY this JSON structure.
                 "Hard": "analytical / critical — ask about limitations, trade-offs, or comparisons",
             }
 
-        # [PROMPT] Chain-of-Draft + commit-on-first-confidence instruction
         sys_prompt = (
             "You are an Expert Technical Interviewer. "
             "If you reason before answering, keep each reasoning step to 5 words or fewer. "
-            "Once you have identified a valid question and its source quote, commit to it — "
-            "do not re-evaluate or rephrase it. "
             "Output ONLY valid JSON."
         )
+
         all_candidates: List[Dict] = []
 
         for difficulty, instruction in difficulty_instructions.items():
@@ -525,28 +502,44 @@ Analyse the TEXT CHUNK above and return ONLY this JSON structure.
 
 ### TASK:
 Generate up to {per_diff} '{difficulty}' questions ({instruction}).
-Questions must be EXCLUSIVELY answerable from the TARGET TEXT CHUNK above.
-If the TARGET TEXT CHUNK is too short to answer a question, do not invent information.
 
-### STRICT RULES:
-1. Every "question" MUST be answerable using ONLY the TARGET TEXT CHUNK.
-2. Every "source_quote" MUST be copied verbatim from the TARGET TEXT CHUNK (≥25 chars).
-   Never pull quotes from the Background Context.
-3. Never generate answers here.
-4. Every question MUST target a DIFFERENT concept, fact, or mechanism from the chunk.
-   Do NOT rephrase or paraphrase any previously listed question.
-   Each question must have a meaningfully distinct answer from all others.
+### STRICT RULES (NEVER VIOLATE):
+1. NEVER copy, reuse, or paraphrase any example question or phrasing that appears anywhere in this prompt.
+2. Do NOT use the word "X" or the phrase "is a bottleneck" in any question unless those exact words are in the chunk.
+3. Every "question" MUST be answerable using ONLY the TARGET TEXT CHUNK.
+4. Every "source_quote" MUST be verbatim sentence(s) from the TARGET TEXT CHUNK that actually contain the answer (minimum 25 characters).
+5. Never generate answers here.
+6. Every question MUST target a DIFFERENT concept, fact, or mechanism from the chunk.
 
 Output ONLY:
 {{"qa_pairs": [ {{"question": "...", "source_quote": "...", "difficulty": "{difficulty}"}}, ... ] }}
 """
+
             result = self._call_model(sys_prompt, user_prompt)
             raw = result.get("qa_pairs", [])
+
+            # Fallback: model emitted flat numbered keys
+            if not raw and result:
+                from collections import defaultdict
+
+                groups: dict = defaultdict(dict)
+                for k, v in result.items():
+                    m = re.match(r"^(question|source_quote)(\d*)$", k)
+                    if m:
+                        groups[m.group(2)][m.group(1)] = v
+                flat_items = [g for g in groups.values() if "question" in g]
+                if flat_items:
+                    logger.warning(
+                        f"Pass 1 [{difficulty}]: model used flat keys — reconstructed {len(flat_items)} item(s)"
+                    )
+                    raw = flat_items
 
             count = 0
             for item in raw:
                 if count >= per_diff:
                     break
+                if not isinstance(item, dict):
+                    continue
                 item["difficulty"] = difficulty
                 all_candidates.append(item)
                 count += 1
@@ -555,41 +548,50 @@ Output ONLY:
 
         return self._deduplicate_candidates(all_candidates)
 
-    # ====================== PASS 2 ======================
-    def generate_reference_answer(self, question: str, chunk_content: str) -> str:
+    def generate_reference_answer(
+        self, question: str, chunk_content: str, source_quote: str = ""
+    ) -> str:
         """
-        Generate a concise reference answer using ONLY chunk_content.
-
-        Uses official LFM2.5-1.2B-Instruct sampling settings.
-        Prompt is intentionally less punitive than strict "not enough info" framing
-        to avoid defensive refusals on small models.
+        Generate a reference answer for *question* grounded in *chunk_content*.
         """
-        # [PROMPT] Chain-of-Draft + write-immediately-and-stop instruction
         sys_prompt = (
-            "You are a technical document analyzer. "
-            "If you reason before answering, keep each reasoning step to 5 words or fewer. "
-            "Once you have located the relevant fact in the source text, write the answer "
-            "immediately and stop. "
-            "Do not re-read the text or reconsider your answer after forming it. "
-            "Extract facts directly from the text."
+            "You are a knowledgeable technical interviewer writing model reference answers. "
+            "Your answers should read like what a well-prepared human candidate would say — "
+            "complete, explanatory, and grounded in the source text. "
+            "Output ONLY the answer text — no preamble, no meta-commentary."
         )
+
+        quote_block = (
+            f"""
+### KEY PASSAGE (this is the specific part of the source that answers the question):
+{source_quote.strip()}
+
+"""
+            if source_quote and len(source_quote.strip()) >= 25
+            else ""
+        )
+
         user_prompt = f"""
 ### SOURCE TEXT:
 {chunk_content}
-
+{quote_block}
 ### QUESTION:
 {question}
 
 ### INSTRUCTIONS:
-- Analyze the Source Text carefully to find the answer to the Question.
-- Your answer MUST be a complete sentence.
-- Your answer MUST be similar to how a human would write a reference answer in a technical interview setting.
-- You MUST use ONLY the information in the SOURCE TEXT. Do NOT use any outside knowledge.
-- If the text specifies a numeric threshold, percentage, or specific condition
-  (e.g., 60%, 15ms, 128 blocks), you MUST include it verbatim in your answer.
-- If, and ONLY IF, the core subject of the question is completely absent from
-  the text, output EXACTLY: NOT_ENOUGH_INFORMATION
+Write a reference answer that a well-prepared human candidate would give in a technical interview.
+{"Focus your answer ONLY on explaining the KEY PASSAGE above." if quote_block else ""}
+
+Rules (must follow exactly):
+1. Use ONLY information stated in the SOURCE TEXT. Do not add outside knowledge.
+2. Do NOT repeat the question or its premise. Start directly with the substance.
+3. Explain using the exact details from the text — no added commentary.
+4. NO EXTRAPOLATION: Do not add "this helps", "this is important because", "researchers can", or any concluding sentence unless the text itself says it.
+5. Write in plain, clear prose (maximum 3 sentences). No bullet points.
+6. If the text gives specific values, thresholds, or named techniques, include them.
+7. If the core subject is completely absent from the source text, output EXACTLY: NOT_ENOUGH_INFORMATION
 """
+
         try:
             response = self.client.chat.completions.create(
                 model=MODEL_NAME,
@@ -597,10 +599,9 @@ Output ONLY:
                     {"role": "system", "content": sys_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                temperature=0.1,  # [LFM] Official recommended value
-                top_k=50,  # [LFM] Official recommended value
-                repetition_penalty=1.05,  # [LFM] Official recommended value
-                max_tokens=300,
+                temperature=0.1,
+                max_tokens=500,
+                extra_body={"top_k": 50, "repetition_penalty": 1.05},
             )
             return response.choices[0].message.content.strip()
         except Exception as e:
@@ -608,7 +609,6 @@ Output ONLY:
             return ""
 
 
-# ---------------- ENRICHMENT MANAGER ----------------
 class EnrichmentManager:
     def __init__(self):
         logger.info("🚀 Starting Optimized Two-Pass Pipeline...")
@@ -616,16 +616,12 @@ class EnrichmentManager:
         self.llm = LLMClient(LLAMA_API_URL)
         self.validator = AnswerValidator()
 
-    # =========================================================
-    # INTERNAL CORE — _process_chunk
-    # =========================================================
     def _process_chunk(self, chunk: Dict, context_str: str) -> Tuple[bool, str]:
         chunk_id = chunk["chunk_id"]
         content = chunk["content"]
         tokens = chunk.get("estimated_tokens", 0)
         ctype = chunk.get("content_type", "prose")
 
-        # ==================== FULL IDEMPOTENCY GUARD ====================
         if chunk.get("should_use") != 1:
             logger.info(f"Chunk {chunk_id[:8]} has should_use=0 — skipping")
             return True, chunk.get("existing_summary", "")
@@ -633,14 +629,12 @@ class EnrichmentManager:
         if chunk.get("existing_summary") and self.db.get_questions_for_chunk(chunk_id):
             logger.info(f"Chunk {chunk_id[:8]} already fully enriched — skipping")
             return True, chunk.get("existing_summary", "")
-        # =================================================================
 
         console.rule(
             f"[bold cyan]Chunk {chunk_id[:8]}[/] | {tokens} tokens | type={ctype}"
         )
 
         logger.info("[bold]\\[1/3] Generating metadata...[/]")
-        # [FIX] Pass content_type so summary instruction is branched correctly
         meta = self.llm.generate_metadata(
             content, context_str, estimated_tokens=tokens, content_type=ctype
         )
@@ -660,12 +654,10 @@ class EnrichmentManager:
             f"{len(meta.get('triplets', []))} triplets"
         )
 
-        # [FIX] Normalise → ground tags against chunk text → log
         meta["tags"] = self.llm._normalize_tags(meta.get("tags", []))
         meta["tags"] = self.llm._verify_tags_grounded(meta["tags"], content)
         logger.info(f"[dim]Grounded tags:[/] {meta['tags']}")
 
-        # [FIX] Ground triplets against chunk text before saving
         meta["triplets"] = self.llm._verify_triplets_grounded(
             meta.get("triplets", []), content
         )
@@ -715,9 +707,6 @@ class EnrichmentManager:
                 )
                 continue
 
-            # [FIX] Math quote guard: fuzzy matching breaks on LaTeX/notation because
-            # whitespace and formatting differences cause score drops on valid verbatim
-            # quotes. For math chunks, use exact substring check instead.
             if ctype == "math":
                 quote_ok = source_quote.strip() in content
                 if not quote_ok:
@@ -734,26 +723,28 @@ class EnrichmentManager:
                     )
                     continue
             else:
-                quote_score = fuzz.partial_ratio(source_quote.lower(), content.lower())
-                score_colour = (
-                    "green" if quote_score >= QUOTE_MATCH_THRESHOLD else "red"
-                )
-                console.print(f"    Quote match: [{score_colour}]{quote_score:.1f}%[/]")
-                if quote_score < QUOTE_MATCH_THRESHOLD:
+                is_grounded, reason = _quote_is_grounded(source_quote, content)
+
+                if is_grounded:
+                    score_colour = "green"
                     console.print(
-                        f"    [red]✗ REJECTED[/] — quote guard ({quote_score:.1f}%)"
+                        f"    Quote match: [{score_colour}]Passed ({reason})[/]"
+                    )
+                else:
+                    console.print(
+                        f"    [red]✗ REJECTED[/] — quote guard failed: {reason}"
                     )
                     rejected_qa.append(
                         {
                             "level": level,
                             "question": question,
                             "answer": "",
-                            "reason": f"Weak quote ({quote_score:.1f}%)",
+                            "reason": f"Weak quote: {reason}",
                         }
                     )
                     continue
 
-            answer = self.llm.generate_reference_answer(question, content)
+            answer = self.llm.generate_reference_answer(question, content, source_quote)
             ans_preview = answer[:100] + ("..." if len(answer) > 100 else "")
             console.print(f"    [dim]Answer:[/] {ans_preview}")
 
@@ -771,6 +762,65 @@ class EnrichmentManager:
                     }
                 )
                 continue
+
+            # ── Post-hoc quote relevance check ────────────────────────────────
+            # The Pass 1 quote guard only verified the quote exists in the chunk.
+            # Now that we have the answer, verify the quote actually contains the
+            # answer content — not just the topic-introduction sentence.
+            # If the answer and quote share very few content words, the model
+            # picked the wrong sentence as the source (e.g. "there are two reasons"
+            # instead of the sentences that describe what those reasons are).
+            if source_quote and ctype != "math":
+                answer_words = _content_words(answer)
+                quote_words = _content_words(source_quote)
+                if answer_words and quote_words:
+                    overlap = len(answer_words & quote_words) / len(answer_words)
+                    if overlap < 0.12:
+                        # Quote and answer share almost no content words — Pass 1
+                        # extracted a setup/intro sentence instead of the answer-bearing one.
+                        #
+                        # RESCUE: scan the chunk sentence by sentence and promote the one
+                        # with the best content-word overlap to the answer. This stays fully
+                        # grounded in verbatim document text — no hallucination risk.
+                        sentences = [
+                            s.strip()
+                            for s in re.split(r"(?<=[.!?])\s+", content)
+                            if len(s.strip()) >= 25
+                        ]
+                        best_sent, best_overlap = "", 0.0
+                        for sent in sentences:
+                            sent_words = _content_words(sent)
+                            if sent_words:
+                                sent_overlap = len(answer_words & sent_words) / len(
+                                    answer_words
+                                )
+                                if sent_overlap > best_overlap:
+                                    best_overlap, best_sent = sent_overlap, sent
+
+                        RESCUE_THRESHOLD = 0.20
+                        if best_overlap >= RESCUE_THRESHOLD and best_sent:
+                            console.print(
+                                f"    [yellow]⚠ RESCUED[/] — swapped quote to best-matching "
+                                f"sentence ({best_overlap:.0%} overlap)"
+                            )
+                            source_quote = best_sent
+                            cand["source_quote"] = best_sent
+                            overlap = best_overlap
+                        else:
+                            console.print(
+                                f"    [red]✗ REJECTED[/] — quote/answer mismatch "
+                                f"({overlap:.0%} overlap); best rescue only "
+                                f"{best_overlap:.0%}. Pass 1 grabbed the wrong sentence."
+                            )
+                            rejected_qa.append(
+                                {
+                                    "level": level,
+                                    "question": question,
+                                    "answer": answer,
+                                    "reason": f"Quote/answer mismatch ({overlap:.0%} overlap)",
+                                }
+                            )
+                            continue
 
             if DEFLECTION_PATTERN.search(answer):
                 console.print("    [red]✗ REJECTED[/] — deflection phrase detected")
@@ -821,9 +871,6 @@ class EnrichmentManager:
 
         return True, meta.get("summary", "")
 
-    # =========================================================
-    # PUBLIC: enrich_single_file
-    # =========================================================
     def enrich_single_file(self, file_id: str) -> None:
         chunks = self.db.get_chunks_for_file_ordered(file_id)
         total = len(chunks)
@@ -849,21 +896,18 @@ class EnrichmentManager:
 
             if ctype in ["table", "math", "code"]:
                 parts = []
-
                 prev_id = chunk.get("prev_chunk_id")
                 if prev_id and prev_id in chunk_map:
                     prev_text = chunk_map[prev_id][:150]
                     parts.append(
                         f"PREV: {prev_text}{'...' if len(prev_text) == 150 else ''}"
                     )
-
                 next_id = chunk.get("next_chunk_id")
                 if next_id and next_id in chunk_map:
                     next_text = chunk_map[next_id][:150]
                     parts.append(
                         f"NEXT: {next_text}{'...' if len(next_text) == 150 else ''}"
                     )
-
                 context_str = (
                     "\n".join(parts) if parts else "No adjacent structural chunks"
                 )
@@ -872,10 +916,6 @@ class EnrichmentManager:
 
             success, summary = self._process_chunk(chunk, context_str)
 
-            # [FIX] Guard history deque against deflection summaries and degenerate
-            # outputs. A bad summary poisons context for all subsequent chunks in the
-            # file. Only append if the summary passes the deflection check and meets
-            # minimum length (MIN_SUMMARY_TOKENS words as a proxy for token count).
             if (
                 success
                 and summary
@@ -885,15 +925,11 @@ class EnrichmentManager:
                 history.append(summary)
             elif success and summary:
                 logger.warning(
-                    f"Summary for chunk {chunk.get('chunk_id', '')[:8]} failed quality "
-                    f"gate — not added to history context"
+                    f"Summary for chunk {chunk.get('chunk_id', '')[:8]} failed quality gate"
                 )
 
         logger.info(f"[green]✅ File {file_id[:8]} enrichment complete[/]")
 
-    # =========================================================
-    # Other public methods
-    # =========================================================
     def enrich_single_chunk(
         self, chunk: Dict, context_str: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -918,7 +954,7 @@ class EnrichmentManager:
             Panel(
                 "[bold green]Two-Pass Enrichment Pipeline[/]\n"
                 f"Model: [cyan]{MODEL_NAME}[/]  |  "
-                f"Workers: [cyan]{MAX_WORKERS}[/]  |  "
+                f"Workers: [cyan]{MAX_WORKERS}[/]  |  "  # B21: now 1
                 f"Quote threshold: [cyan]{QUOTE_MATCH_THRESHOLD}%[/]",
                 title="[bold]🚀 Starting Pipeline[/]",
                 expand=False,
@@ -941,7 +977,7 @@ class EnrichmentManager:
             logger.info(
                 f"Found [bold]{len(files)}[/] pending file(s) — processing batch..."
             )
-            with ThreadPoolExecutor(MAX_WORKERS) as ex:
+            with ThreadPoolExecutor(MAX_WORKERS) as ex:  # B21: MAX_WORKERS=1
                 futures = {
                     ex.submit(self.enrich_single_file, fid): fid for fid in files
                 }
@@ -957,7 +993,6 @@ class EnrichmentManager:
                         logger.error(f"[red]✗ Thread crash[/] on file {fid[:8]}: {e}")
 
 
-# Entry point
 if __name__ == "__main__":
     console.print(
         Panel(

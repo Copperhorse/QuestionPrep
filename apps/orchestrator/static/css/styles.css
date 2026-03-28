@@ -1,9 +1,16 @@
 /* =========================================
    styles.css — QuestionPrep
    Warm Paper Theme
-========================================= */
 
-/* ── Google Fonts (loaded in HTML heads, referenced here) ── */
+   Fix applied:
+     B04 - Added 5 CSS variables that were used in interview.js but never defined:
+             --soft-lime, --peach-pastel, --baby-aqua, --periwinkle, --soft-charcoal
+           These have been added to :root AND mapped to semantically equivalent
+           existing colours so the theme remains consistent. interview.js has also
+           been updated to use the canonical variable names directly, making these
+           aliases a belt-and-suspenders fallback for any other places that may
+           reference the old names.
+========================================= */
 
 :root {
     --paper: #f5f1ea;
@@ -28,6 +35,16 @@
     --bg-info: rgba(90, 138, 168, 0.12);
     --bg-warning: rgba(201, 154, 62, 0.12);
     --bg-danger: rgba(201, 90, 78, 0.12);
+
+    /* ── B04: Previously-undefined variables used in interview.js ── */
+    /* These are now defined as aliases to existing theme colours so that
+       any remaining legacy references in old code continue to work.
+       New code in interview.js has been updated to use canonical names. */
+    --soft-lime: var(--success); /* similarity bar: high  */
+    --peach-pastel: var(--warning); /* similarity bar: medium */
+    --baby-aqua: var(--paper-light); /* feedback card background */
+    --periwinkle: var(--warm); /* summary / CTA button */
+    --soft-charcoal: var(--ink); /* dark action button */
 }
 
 *,
@@ -906,7 +923,7 @@ footer {
     margin-top: 0.5rem;
 }
 
-/* ── Stress banner (interview page) ───────────────────────── */
+/* ── Stress banner ─────────────────────────────────────────── */
 #stress-banner {
     display: none;
     max-width: 800px;
@@ -1031,4 +1048,184 @@ footer {
     .chat-container {
         padding: 1.2rem;
     }
+}
+
+/* ===========================================
+   ADDITIONS — UX & OPT improvements
+   =========================================== */
+
+/* ── Toast notifications (OPT4 / app.js) ──────────────────── */
+#qp-toast-container {
+    position: fixed;
+    bottom: 1.5rem;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 0.6rem;
+    z-index: 9000;
+    pointer-events: none;
+    width: max-content;
+    max-width: calc(100vw - 3rem);
+}
+
+.qp-toast {
+    pointer-events: all;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1.1rem;
+    border-radius: 8px;
+    font-size: 0.88rem;
+    font-family: "Inter", sans-serif;
+    box-shadow: 0 4px 20px rgba(58, 47, 34, 0.18);
+    border: 1px solid;
+    animation: toast-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    max-width: 480px;
+    line-height: 1.5;
+}
+.qp-toast-out {
+    animation: toast-out 0.2s ease forwards;
+}
+@keyframes toast-in {
+    from {
+        opacity: 0;
+        transform: translateY(12px) scale(0.97);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+@keyframes toast-out {
+    from {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+    to {
+        opacity: 0;
+        transform: translateY(6px) scale(0.97);
+    }
+}
+
+.qp-toast-success {
+    background: var(--bg-success);
+    border-color: rgba(106, 158, 118, 0.4);
+    color: #2f4a38;
+}
+.qp-toast-info {
+    background: var(--bg-info);
+    border-color: rgba(90, 138, 168, 0.4);
+    color: #2a4a5c;
+}
+.qp-toast-warning {
+    background: var(--bg-warning);
+    border-color: rgba(201, 154, 62, 0.4);
+    color: #5c4518;
+}
+.qp-toast-error {
+    background: var(--bg-danger);
+    border-color: rgba(201, 90, 78, 0.4);
+    color: #5c2a26;
+}
+
+.qp-toast-msg {
+    flex: 1;
+}
+.qp-toast-close {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1.1rem;
+    line-height: 1;
+    color: inherit;
+    opacity: 0.55;
+    padding: 0 2px;
+    flex-shrink: 0;
+    transition: opacity 0.15s;
+}
+.qp-toast-close:hover {
+    opacity: 1;
+}
+
+/* ── Drag-and-drop upload zone (OPT5 / profile.html) ─────── */
+.upload-drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: 10px;
+    padding: 2rem 1.5rem 1.5rem;
+    text-align: center;
+    transition:
+        border-color 0.25s ease,
+        background 0.25s ease;
+    cursor: default;
+    background: var(--paper-light);
+}
+.upload-drop-zone:hover {
+    border-color: var(--warm-soft);
+}
+.upload-drop-zone.drag-over {
+    border-color: var(--warm);
+    background: rgba(201, 127, 62, 0.06);
+    box-shadow: 0 0 0 4px rgba(201, 127, 62, 0.1);
+}
+.upload-drop-icon {
+    margin-bottom: 0.6rem;
+}
+.upload-drop-hint {
+    font-family: "Lora", Georgia, serif;
+    font-style: italic;
+    font-size: 0.9rem;
+    color: var(--ink-very-light);
+    margin-bottom: 1.2rem;
+}
+.upload-controls {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+}
+
+/* ── Character counter (UX4 / interview.js) ──────────────── */
+.char-counter {
+    font-size: 0.75rem;
+    color: var(--ink-very-light);
+    text-align: right;
+    padding: 0.2rem 0.4rem 0;
+    font-family: "Inter", sans-serif;
+    transition: color 0.2s;
+    user-select: none;
+}
+.char-counter.char-counter-warn {
+    color: var(--warning);
+}
+.char-counter.char-counter-limit {
+    color: var(--danger);
+    font-weight: 600;
+}
+
+/* ── Question progress badge (UX5 / interview.js) ────────── */
+.qp-question-badge {
+    display: none; /* shown by JS */
+    align-items: center;
+    font-size: 0.75rem;
+    font-family: "Inter", sans-serif;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--warm-dark);
+    background: rgba(201, 127, 62, 0.1);
+    border: 1px solid rgba(201, 127, 62, 0.25);
+    border-radius: 999px;
+    padding: 0.3rem 0.9rem;
+    margin: 0 auto 0.75rem;
+}
+
+/* ── Auto-resize textarea baseline (UX2) ─────────────────── */
+/* Remove the fixed height so the JS can drive it */
+#answer-text {
+    resize: none;
+    overflow-y: hidden;
+    transition: height 0.1s ease;
+    min-height: 2.6rem;
 }
