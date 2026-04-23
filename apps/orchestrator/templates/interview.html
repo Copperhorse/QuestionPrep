@@ -12,208 +12,178 @@
         />
         <link rel="stylesheet" href="/static/css/styles.css" />
 
-        <!-- ONNX Runtime — must load before stress-detector.js -->
-        <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+        <script src="/static/js/ort.min.js"></script>
+        <script>
+            if (window.ort) {
+                ort.env.wasm.wasmPaths = "/static/js/";
+                ort.env.wasm.numThreads = 1;
+            }
+        </script>
+        <script src="/static/js/tcn-stress-detector.js"></script>
     </head>
     <body>
-        <!-- ── Navigation ── -->
         <nav class="site-nav">
             <div class="container">
                 <a href="/" class="nav-brand">QuestionPrep</a>
                 <div class="nav-links">
-                    <span
-                        style="
-                            font-size: 0.88rem;
-                            color: var(--ink-very-light);
-                            font-style: italic;
-                            font-family: &quot;Lora&quot;, serif;
-                        "
-                        >Live Practice Session</span
-                    >
+                    <span class="nav-live-badge">Live Practice Session</span>
                     <button id="end-session-btn" class="btn btn-outline btn-sm">
-                        <i data-lucide="x-circle"></i> End Session
+                        <svg
+                            class="lucide"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                        >
+                            <circle cx="12" cy="12" r="10" />
+                            <path d="m15 9-6 6" />
+                            <path d="m9 9 6 6" />
+                        </svg>
+                        End Session
                     </button>
                 </div>
             </div>
         </nav>
 
-        <!-- ── Main ── -->
         <section class="page-section">
-            <div class="container" style="max-width: 860px">
-                <!-- Page header -->
-                <div
-                    style="
-                        margin-bottom: 1.5rem;
-                        padding-bottom: 1.5rem;
-                        border-bottom: 1px solid var(--border);
-                    "
-                >
-                    <h1 style="font-size: clamp(1.6rem, 4vw, 2.2rem)">
-                        Live Practice Session
-                    </h1>
+            <div class="container container-narrow">
+                <div class="page-header interview-header">
+                    <h1>Live Practice Session</h1>
                     <p class="page-subtitle">
                         Take your time. Speak clearly. There is no rush here.
                     </p>
                 </div>
 
-                <!-- Chat window -->
-                <div class="chat-container" id="chat-container">
-                    <!-- Populated dynamically by interview.js -->
-                    <div
-                        style="
-                            text-align: center;
-                            color: var(--ink-very-light);
-                            font-style: italic;
-                            font-family: &quot;Lora&quot;, serif;
-                            padding: 2rem;
-                        "
-                    >
-                        Connecting to session…
-                    </div>
+                <div class="chat-container" id="chat-window">
+                    <div class="chat-placeholder">Connecting to session…</div>
                 </div>
 
-                <!-- Stress banner -->
                 <div id="stress-banner"></div>
                 <div id="stress-details"></div>
 
-                <!-- Audio visualizer -->
-                <div
-                    class="visualizer-wrapper"
-                    id="visualizer-container"
-                    style="margin-top: 1rem"
-                >
+                <div class="visualizer-wrapper" id="visualizer-container">
                     <span class="visualizer-prompt" id="mic-prompt"
                         >Click "Start Mic" to speak</span
                     >
                 </div>
 
-                <!-- Playback -->
                 <audio
                     id="audio-playback"
+                    class="interview-audio"
                     controls
-                    style="
-                        display: none;
-                        width: 100%;
-                        border-radius: 6px;
-                        outline: none;
-                        margin-top: 0.75rem;
-                    "
                 ></audio>
 
-                <!-- Input area -->
-                <div class="input-area" style="margin-top: 1rem">
-                    <button
-                        type="button"
-                        id="mic-btn"
-                        class="btn btn-outline"
-                        style="white-space: nowrap; flex-shrink: 0"
-                    >
-                        <i data-lucide="mic"></i> Start Mic
+                <div class="input-area interview-input-area">
+                    <button type="button" id="mic-btn" class="btn btn-success">
+                        <svg
+                            class="lucide"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                        >
+                            <path d="M12 19v3" />
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                            <rect x="9" y="2" width="6" height="12" rx="3" />
+                        </svg>
+                        Start Mic
                     </button>
                     <textarea
                         class="form-control"
                         id="answer-text"
                         rows="2"
                         placeholder="Type your answer or speak…"
-                        style="resize: none; flex: 1"
                     ></textarea>
-                    <!-- chat-form wraps the submit so interview.js can attach its event -->
-                    <form id="chat-form" style="display: contents">
+                    <form id="chat-form" class="interview-send-form">
                         <button
                             type="submit"
-                            class="btn btn-primary"
-                            style="flex-shrink: 0; padding: 0 1.8rem"
+                            class="btn btn-primary interview-send-btn"
                         >
-                            <i data-lucide="send"></i> Send
+                            <svg
+                                class="lucide"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <path d="m22 2-7 20-4-9-9-4Z" />
+                                <path d="M22 2 11 13" />
+                            </svg>
+                            Send
                         </button>
                     </form>
                 </div>
 
-                <!-- End session note -->
-                <p
-                    style="
-                        margin-top: 1rem;
-                        font-size: 0.82rem;
-                        color: var(--ink-very-light);
-                        text-align: center;
-                        font-style: italic;
-                        font-family: &quot;Lora&quot;, serif;
-                    "
-                >
+                <p class="interview-hint">
                     Your answers are saved automatically. You can end the
                     session at any time.
                 </p>
             </div>
         </section>
 
-        <!-- Session logic — must load before the module script below -->
         <script src="/static/js/interview.js"></script>
 
-        <!-- Stress detector (browser global) -->
-        <script src="/static/js/stress-detector.js"></script>
-
-        <!-- Mic visualizer + stress analysis pipeline (ES module) -->
         <script type="module">
             import AudioMotionAnalyzer from "https://unpkg.com/audiomotion-analyzer?module";
 
-            // ── DOM refs ──────────────────────────────────────────────────────
             const container = document.getElementById("visualizer-container");
             const micBtn = document.getElementById("mic-btn");
             const micPrompt = document.getElementById("mic-prompt");
-            const audioPlayback = document.getElementById("audio-playback");
+            const audioPlay = document.getElementById("audio-playback");
             const stressBanner = document.getElementById("stress-banner");
             const stressDetails = document.getElementById("stress-details");
             const answerText = document.getElementById("answer-text");
 
-            // ── State ─────────────────────────────────────────────────────────
             let audioMotion = null;
             let micStream = null;
             let mediaRecorder = null;
             let audioChunks = [];
 
-            // ── Stress detector — load models in background ───────────────────
-            //
-            // FIX: Three bugs corrected here:
-            //
-            //  1. Constructor key names were wrong.  StressDetector expects
-            //     { xgboostPath, rfPath, lrPath } but the original code passed
-            //     { xgboost, randomForest, logisticRegression }.  Wrong keys are
-            //     silently ignored and the class falls back to its default paths,
-            //     so any path customisation here was a no-op.
-            //
-            //  2. detector.load() was called after construction.  StressDetector
-            //     has no .load() method — models are loaded automatically inside
-            //     the constructor via this._initPromise.  The erroneous call
-            //     threw "TypeError: detector.load is not a function", which the
-            //     catch block turned into detector = null, silently disabling all
-            //     stress analysis on every page load.
-            //
-            //  3. showStressBanner() referenced stressResult.modelScores which
-            //     predict() never returned, causing a TypeError when displaying
-            //     the per-model pill badges.  stress-detector.js now includes
-            //     modelScores in every return value (including error paths).
+            const PREFERRED_MIME_TYPES = [
+                "audio/webm;codecs=opus",
+                "audio/webm",
+                "audio/ogg;codecs=opus",
+                "audio/ogg",
+            ];
+            const RECORDER_MIME_TYPE =
+                PREFERRED_MIME_TYPES.find((t) =>
+                    MediaRecorder.isTypeSupported(t),
+                ) ?? "";
+
             let detector = null;
-            if (window.StressDetector) {
-                // FIX 1: use the correct constructor key names
-                detector = new window.StressDetector({
-                    xgboostPath: "/static/models/xgboost.onnx",
-                    rfPath: "/static/models/random_forest.onnx",
-                    lrPath: "/static/models/logistic_regression.onnx",
+            if (window.TcnStressDetector) {
+                detector = new window.TcnStressDetector({
+                    modelPath: "/static/models/tcn_audio_model.onnx",
+                    wasmDir: "/static/js/",
+                    workerPath: "/static/js/tcn-worker.js",
                 });
-                // FIX 2: models load via _initPromise in the constructor —
-                // there is no .load() method.  Attach the failure handler to
-                // _initPromise directly so we still disable the detector if the
-                // ONNX files cannot be fetched.
-                detector._initPromise.catch((err) => {
-                    console.warn(
-                        "[StressDetector] Model load failed — stress analysis disabled.",
+                detector.init().catch((err) => {
+                    console.error(
+                        "[TcnStressDetector] Model load FAILED:",
                         err,
                     );
                     detector = null;
+                    stressBanner.textContent =
+                        "Stress analysis unavailable — TCN model could not be loaded.";
+                    stressBanner.className = "unavailable";
+                    stressBanner.style.display = "block";
                 });
+            } else {
+                console.error(
+                    "TcnStressDetector not found on window. Check that tcn-stress-detector.js loaded without syntax errors.",
+                );
+                stressBanner.textContent =
+                    "Stress analysis unavailable — detector library failed to load.";
+                stressBanner.className = "unavailable";
+                stressBanner.style.display = "block";
             }
 
-            // ── Visualizer ────────────────────────────────────────────────────
             function initVisualizer() {
                 audioMotion = new AudioMotionAnalyzer(container, {
                     source: null,
@@ -243,7 +213,6 @@
                 audioMotion.disconnectOutput();
             }
 
-            // ── Stress UI ─────────────────────────────────────────────────────
             const STRESS_MESSAGES = {
                 not_stressed: "You sound calm and composed. Keep going.",
                 mild: "Slight hesitation detected. Take a breath before continuing.",
@@ -252,25 +221,27 @@
                 highly_stressed:
                     "High stress detected. Pause, breathe, and speak at a steady pace.",
                 analyzing: "Analysing your response…",
+                unavailable: "Stress analysis is currently unavailable.",
             };
 
             function showStressBanner(level, details = null) {
                 stressBanner.className = level;
                 stressBanner.textContent = STRESS_MESSAGES[level] || level;
                 stressBanner.style.display = "block";
-
                 if (details && level !== "analyzing") {
-                    // FIX 3: stress-detector.js now always returns modelScores so
-                    // this block is safe.  Previously modelScores was undefined,
-                    // causing a TypeError on .xgboost / .randomForest / .logisticRegression.
-                    const scores = details.modelScores || {};
-                    stressDetails.innerHTML = `
-            <span class="stress-pill">Probability: ${(details.probability * 100).toFixed(0)}%</span>
-            <span class="stress-pill">XGB: ${((scores.xgboost ?? 0) * 100).toFixed(0)}%</span>
-            <span class="stress-pill">RF: ${((scores.randomForest ?? 0) * 100).toFixed(0)}%</span>
-            <span class="stress-pill">LR: ${((scores.logisticRegression ?? 0) * 100).toFixed(0)}%</span>
-            ${details.stutterFlag ? '<span class="stress-pill">Disfluency detected</span>' : ""}
-          `;
+                    const pills = [
+                        `<span class="stress-pill">Stress: ${(details.probability * 100).toFixed(0)}%</span>`,
+                        `<span class="stress-pill">Emotion: ${details.emotion || "unknown"}</span>`,
+                    ];
+                    if (details.stutterFlag)
+                        pills.push(
+                            '<span class="stress-pill">Disfluency detected</span>',
+                        );
+                    if (details.processingMs)
+                        pills.push(
+                            `<span class="stress-pill">${details.processingMs}ms</span>`,
+                        );
+                    stressDetails.innerHTML = pills.join("");
                     stressDetails.style.display = "flex";
                 } else {
                     stressDetails.style.display = "none";
@@ -282,7 +253,6 @@
                 stressDetails.style.display = "none";
             }
 
-            // ── Decode webm blob → Float32Array at 16kHz ──────────────────────
             async function blobToFloat32(blob) {
                 const arrayBuffer = await blob.arrayBuffer();
                 const audioCtx = new AudioContext({ sampleRate: 16000 });
@@ -291,7 +261,6 @@
                 return decoded.getChannelData(0);
             }
 
-            // ── Server STT + disfluency ───────────────────────────────────────
             async function analyzeOnServer(blob) {
                 try {
                     const formData = new FormData();
@@ -308,29 +277,39 @@
                 }
             }
 
-            // ── Main analysis pipeline ────────────────────────────────────────
             async function runAnalysis(audioBlob) {
-                if (!detector) return;
                 showStressBanner("analyzing");
-
                 try {
-                    const [float32Audio, serverResult] = await Promise.all([
-                        blobToFloat32(audioBlob),
-                        analyzeOnServer(audioBlob),
+                    const sttPromise = analyzeOnServer(audioBlob);
+                    const audioPromise = blobToFloat32(audioBlob);
+                    const readyPromise = detector
+                        ? detector.waitUntilReady().catch(() => {
+                              detector = null;
+                          })
+                        : Promise.resolve();
+
+                    const [serverResult, float32Audio] = await Promise.all([
+                        sttPromise,
+                        audioPromise,
+                        readyPromise,
                     ]);
 
-                    if (serverResult.transcript) {
+                    if (serverResult.transcript)
                         answerText.value = serverResult.transcript;
+                    if (!detector) {
+                        if (stressBanner.className !== "unavailable")
+                            hideStressBanner();
+                        return;
                     }
-
-                    const stressResult = await detector.predict(
-                        float32Audio,
+                    detector.setDisfluencyFlag(
                         serverResult.stutter_flag || false,
                     );
-                    showStressBanner(stressResult.level, {
-                        probability: stressResult.probability,
-                        // FIX 3: modelScores is now always present in stressResult
-                        modelScores: stressResult.modelScores,
+                    const stressResult =
+                        await detector.analyseClip(float32Audio);
+                    showStressBanner(stressResult.stressLevel, {
+                        probability: stressResult.stressProb,
+                        emotion: stressResult.emotion,
+                        processingMs: stressResult.processingMs,
                         stutterFlag: serverResult.stutter_flag,
                     });
                 } catch (err) {
@@ -339,28 +318,20 @@
                 }
             }
 
-            // ── Mic button ────────────────────────────────────────────────────
             micBtn.addEventListener("click", async () => {
                 if (!audioMotion) initVisualizer();
-
                 if (micStream) {
-                    // TOGGLE OFF
-                    if (mediaRecorder && mediaRecorder.state !== "inactive") {
+                    if (mediaRecorder?.state !== "inactive")
                         mediaRecorder.stop();
-                    }
-                    micStream.getTracks().forEach((track) => track.stop());
+                    micStream.getTracks().forEach((t) => t.stop());
                     audioMotion.disconnectInput();
                     micStream = null;
-
-                    micBtn.innerHTML = '<i data-lucide="mic"></i> Start Mic';
-                    micBtn.classList.remove("btn-danger");
-                    micBtn.classList.add("btn-outline");
+                    micBtn.innerHTML =
+                        '<svg class="lucide" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19v3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><rect x="9" y="2" width="6" height="12" rx="3"/></svg> Start Mic';
+                    micBtn.className = "btn btn-success";
                     micPrompt.style.display = "block";
-                    lucide.createIcons();
                     return;
                 }
-
-                // TOGGLE ON
                 try {
                     micStream = await navigator.mediaDevices.getUserMedia({
                         audio: {
@@ -370,36 +341,35 @@
                         },
                         video: false,
                     });
-
                     const micNode =
                         audioMotion.audioCtx.createMediaStreamSource(micStream);
                     audioMotion.connectInput(micNode);
-
                     audioChunks = [];
-                    mediaRecorder = new MediaRecorder(micStream);
-
-                    mediaRecorder.ondataavailable = (event) => {
-                        if (event.data.size > 0) audioChunks.push(event.data);
+                    mediaRecorder = new MediaRecorder(
+                        micStream,
+                        RECORDER_MIME_TYPE
+                            ? { mimeType: RECORDER_MIME_TYPE }
+                            : {},
+                    );
+                    mediaRecorder.ondataavailable = (e) => {
+                        if (e.data.size > 0) audioChunks.push(e.data);
                     };
-
                     mediaRecorder.onstop = async () => {
+                        const blobType = RECORDER_MIME_TYPE || "audio/webm";
                         const audioBlob = new Blob(audioChunks, {
-                            type: "audio/webm",
+                            type: blobType,
                         });
-                        audioPlayback.src = URL.createObjectURL(audioBlob);
-                        audioPlayback.style.display = "block";
+                        audioPlay.src = URL.createObjectURL(audioBlob);
+                        audioPlay.style.display = "block";
                         await runAnalysis(audioBlob);
                     };
-
                     mediaRecorder.start();
-                    audioPlayback.style.display = "none";
+                    audioPlay.style.display = "none";
                     hideStressBanner();
-
-                    micBtn.innerHTML = '<i data-lucide="square"></i> Stop Mic';
-                    micBtn.classList.remove("btn-outline");
-                    micBtn.classList.add("btn-danger");
+                    micBtn.innerHTML =
+                        '<svg class="lucide" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/></svg> Stop Mic';
+                    micBtn.className = "btn btn-danger";
                     micPrompt.style.display = "none";
-                    lucide.createIcons();
                 } catch (err) {
                     console.error("Microphone access denied or failed:", err);
                     alert(
@@ -407,12 +377,6 @@
                     );
                 }
             });
-        </script>
-
-        <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
-        <script src="/static/js/status-panel.js" defer></script>
-        <script>
-            lucide.createIcons();
         </script>
     </body>
 </html>

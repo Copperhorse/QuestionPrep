@@ -1,29 +1,6 @@
 /* =========================================
    interview.js — Interview Session Logic
 
-   Original fixes:
-     B03 - session_id stored in localStorage; resumed on reload.
-     B04 - Replaced undefined CSS variables.
-     B20 - Only the submit button is disabled during evaluation, not the textarea.
-     B02 - TTS now integrated correctly as const arrow (no hoisting race).
-
-   UX improvements (senior engineer pass):
-     UX1 - Ctrl+Enter (or Cmd+Enter on Mac) submits the answer without
-           reaching for the mouse. A hint is shown in the textarea placeholder.
-
-     UX2 - Auto-resizing textarea. The answer box grows as the user types
-           (up to 200px) instead of forcing a fixed 2-row box.
-
-     UX3 - Draft persistence. The current answer text is saved to
-           sessionStorage on every keystroke and restored when a new question
-           is displayed. Accidental refreshes no longer lose in-progress work.
-           The draft is cleared on successful submit or intentional session end.
-
-     UX4 - Character counter. A small live counter sits below the textarea,
-           turning amber at 800 chars and red at 1200 chars.
-
-     UX5 - Question progress badge. A "Question N" chip appears above the
-           chat window as the session advances.
 ========================================= */
 
 const API_BASE = "";
@@ -161,9 +138,18 @@ function setSubmitEnabled(enabled) {
   if (micBtn) micBtn.disabled = !enabled;
 }
 
+// FIX-LABEL: was btn.textContent = text, which stripped the Lucide icon child
+// element.  Now uses innerHTML so the icon is restored when resetting to "Send".
 function setSubmitLabel(text) {
   const btn = chatForm?.querySelector("button[type='submit']");
-  if (btn) btn.textContent = text;
+  if (!btn) return;
+  if (text === "Send") {
+    btn.innerHTML = '<i data-lucide="send"></i> Send';
+    if (window.lucide) lucide.createIcons();
+  } else {
+    // During transient states like "Evaluating…" an icon isn't needed.
+    btn.textContent = text;
+  }
 }
 
 // ── B03: Session Resume Logic ──────────────────────────────────────────────────
@@ -312,7 +298,7 @@ function showSummaryButton() {
   chatContainer.scrollTop = chatContainer.scrollHeight;
 }
 
-// ── B02: TTS helper ─────────────────────────────────────────────────────────────
+// ── B02: TTS helper ────────────────────────────────────────────────────────────
 async function speakQuestion(text) {
   try {
     const res = await fetch(`${API_BASE}/api/tts`, {
@@ -324,7 +310,12 @@ async function speakQuestion(text) {
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
-    audio.play();
+    try {
+      await audio.play();
+    } catch (playErr) {
+      // Autoplay blocked by browser before first user interaction — non-fatal.
+      console.warn("TTS autoplay blocked:", playErr);
+    }
     audio.onended = () => URL.revokeObjectURL(url);
   } catch (err) {
     console.warn("TTS unavailable:", err);

@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+        />
+        <meta name="theme-color" content="#c97f3e" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta
+            name="apple-mobile-web-app-status-bar-style"
+            content="black-translucent"
+        />
+        <meta name="apple-mobile-web-app-title" content="StressCheck" />
+
+        <title>StressCheck — Companion</title>
+        <link rel="manifest" href="/static/manifest.json" />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Cormorant:ital,wght@0,300;0,400;1,300;1,400&family=Inter:wght@400;500;600&family=Lora:ital,wght@0,400;0,500;1,400;1,500&display=swap"
+            rel="stylesheet"
+        />
+        <link rel="stylesheet" href="/static/css/styles.css" />
+
+        <script src="/static/js/ort.min.js"></script>
+        <script>
+            if (window.ort) {
+                ort.env.wasm.wasmPaths = "/static/js/";
+                ort.env.wasm.numThreads = 1;
+            }
+        </script>
+        <script src="/static/js/tcn-stress-detector.js"></script>
+    </head>
+    <body class="companion-body">
+        <div class="companion-app">
+            <header class="companion-header">
+                <div class="companion-brand">
+                    <svg
+                        class="lucide icon-xl"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <path
+                            d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"
+                        />
+                    </svg>
+                    <span>StressCheck</span>
+                </div>
+                <div class="companion-status" id="status-badge">
+                    <span class="status-dot" id="status-dot"></span>
+                    <span id="status-text">Initializing…</span>
+                </div>
+            </header>
+
+            <div class="companion-visualizer" id="visualizer-container">
+                <div class="companion-prompt" id="mic-prompt">
+                    <svg
+                        class="lucide icon-xl"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <path d="M12 19v3" />
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                        <rect x="9" y="2" width="6" height="12" rx="3" />
+                    </svg>
+                    <p>Tap the mic to start</p>
+                </div>
+            </div>
+
+            <div class="companion-card" id="result-card" style="display: none">
+                <div class="companion-card-header">
+                    <svg
+                        class="lucide"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <path
+                            d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"
+                        />
+                    </svg>
+                    <span>Analysis Result</span>
+                </div>
+                <div class="companion-stress-level" id="stress-level">—</div>
+                <div class="companion-stress-bar">
+                    <div
+                        class="companion-stress-fill"
+                        id="stress-fill"
+                        style="width: 0%"
+                    ></div>
+                </div>
+                <div class="companion-metrics" id="stress-metrics"></div>
+                <p class="companion-advice" id="stress-advice"></p>
+            </div>
+
+            <div class="companion-controls">
+                <button
+                    id="mic-btn"
+                    class="btn btn-primary btn-lg companion-mic-btn"
+                >
+                    <svg
+                        class="lucide"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <path d="M12 19v3" />
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                        <rect x="9" y="2" width="6" height="12" rx="3" />
+                    </svg>
+                    Start Listening
+                </button>
+                <button
+                    id="stop-btn"
+                    class="btn btn-danger btn-lg companion-mic-btn"
+                    style="display: none"
+                >
+                    <svg
+                        class="lucide"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <rect width="18" height="18" x="3" y="3" rx="2" />
+                    </svg>
+                    Stop
+                </button>
+            </div>
+
+            <div
+                class="companion-history"
+                id="history-panel"
+                style="display: none"
+            >
+                <h3 class="companion-history-title">
+                    <svg
+                        class="lucide"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <path
+                            d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"
+                        />
+                        <path d="M3 3v5h5" />
+                    </svg>
+                    Session History
+                </h3>
+                <div class="companion-history-list" id="history-list"></div>
+            </div>
+
+            <p class="companion-footer">
+                Runs entirely on your device. No data leaves your phone.
+            </p>
+        </div>
+
+        <script type="module">
+            import AudioMotionAnalyzer from "https://unpkg.com/audiomotion-analyzer?module";
+
+            console.log(
+                "Module script executing. window.TcnStressDetector =",
+                typeof window.TcnStressDetector,
+            );
+
+            const visualizerContainer = document.getElementById(
+                "visualizer-container",
+            );
+            const micPrompt = document.getElementById("mic-prompt");
+            const micBtn = document.getElementById("mic-btn");
+            const stopBtn = document.getElementById("stop-btn");
+            const statusDot = document.getElementById("status-dot");
+            const statusText = document.getElementById("status-text");
+            const resultCard = document.getElementById("result-card");
+            const stressLevelEl = document.getElementById("stress-level");
+            const stressFill = document.getElementById("stress-fill");
+            const stressMetrics = document.getElementById("stress-metrics");
+            const stressAdvice = document.getElementById("stress-advice");
+            const historyPanel = document.getElementById("history-panel");
+            const historyList = document.getElementById("history-list");
+
+            let detector = null;
+            let audioMotion = null;
+            let micStream = null;
+            let mediaRecorder = null;
+            let audioChunks = [];
+            let sessionHistory = [];
+            let isRecording = false;
+
+            const RECORDER_MIME_TYPE =
+                [
+                    "audio/webm;codecs=opus",
+                    "audio/webm",
+                    "audio/ogg;codecs=opus",
+                    "audio/ogg",
+                ].find((t) => MediaRecorder.isTypeSupported(t)) ?? "";
+
+            const ADVICE = {
+                not_stressed: "You're sounding calm and composed. Great job!",
+                mild: "A slight tension detected. Try a slow breath in… and out.",
+                stressed:
+                    "Stress signals present. Pause, breathe, reset your pace.",
+                highly_stressed:
+                    "High stress detected. Take a 30-second break before continuing.",
+            };
+
+            const LEVEL_LABELS = {
+                not_stressed: "Calm",
+                mild: "Mild Tension",
+                stressed: "Stressed",
+                highly_stressed: "High Stress",
+            };
+
+            const LEVEL_COLORS = {
+                not_stressed: "#6a9e76",
+                mild: "#c99a3e",
+                stressed: "#c97f3e",
+                highly_stressed: "#c95a4e",
+            };
+
+            async function initDetector() {
+                if (!window.TcnStressDetector) {
+                    const msg =
+                        "TCN library not loaded. Check console for script parse errors.";
+                    setStatus("error", msg);
+                    console.error(
+                        "window.TcnStressDetector is undefined. Verify tcn-stress-detector.js loaded without syntax errors.",
+                    );
+                    return false;
+                }
+                detector = new window.TcnStressDetector({
+                    modelPath: "/static/models/tcn_audio_model.onnx",
+                    wasmDir: "/static/js/",
+                    workerPath: "/static/js/tcn-worker.js",
+                });
+                try {
+                    setStatus("loading", "Loading TCN model…");
+                    await detector.init();
+                    setStatus("ready", "Ready — tap mic to start");
+                    return true;
+                } catch (err) {
+                    console.error(err);
+                    setStatus("error", `Model failed to load: ${err.message}`);
+                    return false;
+                }
+            }
+
+            function setStatus(state, text) {
+                statusText.textContent = text;
+                statusDot.className = "status-dot";
+                if (state === "ready") statusDot.classList.add("ready");
+                else if (state === "loading")
+                    statusDot.classList.add("loading");
+                else if (state === "error") statusDot.classList.add("error");
+                else if (state === "recording")
+                    statusDot.classList.add("recording");
+                else if (state === "analyzing")
+                    statusDot.classList.add("analyzing");
+            }
+
+            function initVisualizer() {
+                if (audioMotion) return;
+                audioMotion = new AudioMotionAnalyzer(visualizerContainer, {
+                    source: null,
+                    height: 200,
+                    mode: 3,
+                    barSpace: 0.4,
+                    ledBars: false,
+                    lumiBars: true,
+                    radial: false,
+                    showScaleX: false,
+                    showScaleY: false,
+                    bgAlpha: 0,
+                    overlay: true,
+                    gradient: "classic",
+                    minDecibels: -75,
+                    smoothing: 0.8,
+                });
+                audioMotion.registerGradient("warm", {
+                    bgColor: "transparent",
+                    colorStops: [
+                        { pos: 0, color: "#b1682e" },
+                        { pos: 0.5, color: "#c97f3e" },
+                        { pos: 1, color: "#dfa56f" },
+                    ],
+                });
+                audioMotion.setOptions({ gradient: "warm" });
+                audioMotion.disconnectOutput();
+            }
+
+            async function startRecording() {
+                if (!detector?._ready) {
+                    alert("Model not ready yet. Please wait.");
+                    return;
+                }
+                initVisualizer();
+                try {
+                    micStream = await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            noiseSuppression: true,
+                            echoCancellation: true,
+                            autoGainControl: false,
+                        },
+                        video: false,
+                    });
+                    const micNode =
+                        audioMotion.audioCtx.createMediaStreamSource(micStream);
+                    audioMotion.connectInput(micNode);
+
+                    audioChunks = [];
+                    mediaRecorder = new MediaRecorder(
+                        micStream,
+                        RECORDER_MIME_TYPE
+                            ? { mimeType: RECORDER_MIME_TYPE }
+                            : {},
+                    );
+                    mediaRecorder.ondataavailable = (e) => {
+                        if (e.data.size > 0) audioChunks.push(e.data);
+                    };
+                    mediaRecorder.onstop = async () => {
+                        const blobType = RECORDER_MIME_TYPE || "audio/webm";
+                        const audioBlob = new Blob(audioChunks, {
+                            type: blobType,
+                        });
+                        await analyzeOffline(audioBlob);
+                    };
+
+                    mediaRecorder.start(100);
+                    isRecording = true;
+                    micPrompt.style.display = "none";
+                    micBtn.style.display = "none";
+                    stopBtn.style.display = "flex";
+                    setStatus("recording", "Listening…");
+                    resultCard.style.display = "none";
+                } catch (err) {
+                    console.error(err);
+                    alert("Microphone access denied.");
+                }
+            }
+
+            function stopRecording() {
+                if (mediaRecorder?.state !== "inactive") mediaRecorder.stop();
+                micStream?.getTracks().forEach((t) => t.stop());
+                audioMotion?.disconnectInput();
+                micStream = null;
+                isRecording = false;
+                micPrompt.style.display = "flex";
+                micBtn.style.display = "flex";
+                stopBtn.style.display = "none";
+                setStatus("analyzing", "Analyzing…");
+            }
+
+            async function analyzeOffline(audioBlob) {
+                try {
+                    const arrayBuffer = await audioBlob.arrayBuffer();
+                    const audioCtx = new AudioContext({ sampleRate: 16000 });
+                    const decoded = await audioCtx.decodeAudioData(arrayBuffer);
+                    await audioCtx.close();
+                    const float32Audio = decoded.getChannelData(0);
+
+                    const result = await detector.analyseClip(float32Audio);
+
+                    showResult(result);
+                    addToHistory(result);
+                    setStatus("ready", "Ready — tap mic to start");
+                } catch (err) {
+                    console.error(err);
+                    setStatus("error", `Analysis failed: ${err.message}`);
+                }
+            }
+
+            function showResult(result) {
+                const level = result.stressLevel;
+                const prob = result.stressProb;
+                const color = LEVEL_COLORS[level];
+
+                stressLevelEl.textContent = LEVEL_LABELS[level];
+                stressLevelEl.style.color = color;
+                stressFill.style.width = `${Math.round(prob * 100)}%`;
+                stressFill.style.background = color;
+                stressAdvice.textContent = ADVICE[level];
+
+                stressMetrics.innerHTML = `
+                <span class="companion-metric"><strong>${(prob * 100).toFixed(0)}%</strong> stress probability</span>
+                <span class="companion-metric"><strong>${result.emotion}</strong> detected emotion</span>
+                <span class="companion-metric"><strong>${result.processingMs}ms</strong> on-device</span>
+            `;
+
+                resultCard.style.display = "block";
+                resultCard.scrollIntoView({
+                    behavior: "smooth",
+                    block: "nearest",
+                });
+            }
+
+            function addToHistory(result) {
+                sessionHistory.unshift({
+                    time: new Date().toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                    }),
+                    level: result.stressLevel,
+                    prob: result.stressProb,
+                    emotion: result.emotion,
+                });
+                renderHistory();
+            }
+
+            function renderHistory() {
+                if (sessionHistory.length === 0) return;
+                historyPanel.style.display = "block";
+                historyList.innerHTML = sessionHistory
+                    .map(
+                        (h, i) => `
+                <div class="companion-history-item" style="--item-color: ${LEVEL_COLORS[h.level]}">
+                    <span class="history-time">${h.time}</span>
+                    <span class="history-level">${LEVEL_LABELS[h.level]}</span>
+                    <span class="history-prob">${(h.prob * 100).toFixed(0)}%</span>
+                    <span class="history-emotion">${h.emotion}</span>
+                </div>
+            `,
+                    )
+                    .join("");
+            }
+
+            micBtn.addEventListener("click", startRecording);
+            stopBtn.addEventListener("click", stopRecording);
+
+            initDetector();
+        </script>
+
+        <script>
+            if ("serviceWorker" in navigator) {
+                navigator.serviceWorker
+                    .register("/sw.js")
+                    .then((reg) => console.log("SW registered:", reg.scope))
+                    .catch((err) => console.error("SW failed:", err));
+            }
+        </script>
+    </body>
+</html>

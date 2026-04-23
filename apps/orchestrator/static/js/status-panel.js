@@ -1,24 +1,6 @@
 /**
  * status-panel.js — QuestionPrep live backend status panel
- *
- * Connects to GET /api/events (Server-Sent Events) and renders a
- * floating terminal that shows exactly what the backend is doing.
- * Also polls GET /api/status every 5 s to keep the header badge current.
- *
- * Improvements (senior engineer pass):
- *
- *   OPT1 - highlightMsg() previously applied 6 sequential regex replacements,
- *          each of which scanned the entire string from the beginning.
- *          Replaced with a single compiled alternation regex that makes one
- *          pass and dispatches to the right CSS class via a lookup Map.
- *          The regex literals are module-level constants — compiled once by
- *          the JS engine at parse time, not re-created on every log line.
- *
- *   OPT2 - DOM pruning previously looped with removeChild(firstChild) until
- *          the count was within MAX_LINES.  Each removeChild triggers a
- *          style/layout recalculation.  Replaced with a document.createRange()
- *          + deleteContents() call that removes all excess nodes in a single
- *          DOM mutation, reducing layout work from O(excess) to O(1).
+
  */
 
 "use strict";

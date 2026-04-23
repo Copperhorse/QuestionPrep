@@ -1229,3 +1229,406 @@ footer {
     transition: height 0.1s ease;
     min-height: 2.6rem;
 }
+/* ── Interview layout tokens (replaces inline styles) ── */
+.container-narrow {
+    max-width: 860px;
+}
+
+.interview-header {
+    margin-bottom: 1.5rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.nav-live-badge {
+    font-size: 0.88rem;
+    color: var(--ink-very-light);
+    font-style: italic;
+    font-family: "Lora", serif;
+}
+
+.chat-placeholder {
+    text-align: center;
+    color: var(--ink-very-light);
+    font-style: italic;
+    font-family: "Lora", serif;
+    padding: 2rem;
+}
+
+.interview-audio {
+    display: none;
+    width: 100%;
+    border-radius: 6px;
+    outline: none;
+    margin-top: 0.75rem;
+}
+
+.interview-input-area {
+    margin-top: 1rem;
+}
+
+.interview-send-form {
+    display: contents;
+}
+
+.interview-send-btn {
+    flex-shrink: 0;
+    padding: 0 1.8rem;
+}
+
+.interview-hint {
+    margin-top: 1rem;
+    font-size: 0.82rem;
+    color: var(--ink-very-light);
+    text-align: center;
+    font-style: italic;
+    font-family: "Lora", serif;
+}
+
+/* ── Mobile interview optimisations ── */
+@media (max-width: 640px) {
+    .container-narrow {
+        padding: 0 1rem;
+    }
+    .interview-header h1 {
+        font-size: 1.6rem;
+    }
+
+    .input-area {
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+    .interview-input-area #answer-text {
+        order: -1;
+        width: 100%;
+        flex: none !important;
+    }
+    .interview-input-area button,
+    .interview-input-area .interview-send-btn {
+        flex: 1 1 45%;
+        justify-content: center;
+    }
+
+    .chat-container {
+        padding: 1.2rem;
+        min-height: 35vh;
+    }
+
+    #stress-banner,
+    #stress-details {
+        max-width: 100%;
+        margin-left: 1rem;
+        margin-right: 1rem;
+    }
+
+    .visualizer-wrapper {
+        height: 100px;
+    }
+}
+
+/* ── PWA standalone / safe-area support ── */
+@media (display-mode: standalone) {
+    body {
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+    .site-nav {
+        padding-top: max(1.2rem, env(safe-area-inset-top));
+    }
+    .page-section {
+        padding-bottom: max(3.5rem, env(safe-area-inset-bottom));
+    }
+}
+/* ===========================================
+   COMPANION APP — Mobile-first offline PWA
+   =========================================== */
+
+.companion-body {
+    background: var(--paper);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right)
+        env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+.companion-app {
+    max-width: 480px;
+    margin: 0 auto;
+    width: 100%;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+/* Header */
+.companion-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0;
+}
+
+.companion-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: "Cormorant", Georgia, serif;
+    font-size: 1.4rem;
+    font-weight: 300;
+    color: var(--ink);
+}
+
+.companion-status {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.78rem;
+    color: var(--ink-very-light);
+    font-family: "Inter", sans-serif;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--ink-very-light);
+    flex-shrink: 0;
+    transition: background 0.3s;
+}
+
+.status-dot.ready {
+    background: var(--success);
+    box-shadow: 0 0 6px rgba(106, 158, 118, 0.4);
+}
+.status-dot.loading {
+    background: var(--warning);
+    animation: pulse-dot 1s ease-in-out infinite;
+}
+.status-dot.error {
+    background: var(--danger);
+}
+.status-dot.recording {
+    background: var(--danger);
+    animation: pulse-dot 0.8s ease-in-out infinite;
+}
+.status-dot.analyzing {
+    background: var(--warm);
+    animation: pulse-dot 1s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+    0%,
+    100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.4;
+    }
+}
+
+/* Visualizer */
+.companion-visualizer {
+    width: 100%;
+    height: 220px;
+    background: var(--paper-light);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    position: relative;
+    box-shadow: 0 2px 16px var(--shadow);
+}
+
+.companion-prompt {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    color: var(--ink-very-light);
+    font-family: "Lora", serif;
+    font-style: italic;
+    font-size: 1rem;
+    z-index: 10;
+    pointer-events: none;
+}
+
+/* Result Card */
+.companion-card {
+    background: var(--paper-light);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: 0 4px 24px rgba(90, 55, 25, 0.08);
+    animation: card-in 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes card-in {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.companion-card-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-very-light);
+    margin-bottom: 1rem;
+}
+
+.companion-stress-level {
+    font-family: "Cormorant", Georgia, serif;
+    font-size: 2rem;
+    font-weight: 300;
+    margin-bottom: 0.75rem;
+    transition: color 0.3s;
+}
+
+.companion-stress-bar {
+    height: 8px;
+    background: var(--paper-deep);
+    border-radius: 999px;
+    overflow: hidden;
+    margin-bottom: 1rem;
+}
+
+.companion-stress-fill {
+    height: 100%;
+    border-radius: 999px;
+    transition:
+        width 0.8s cubic-bezier(0.16, 1, 0.3, 1),
+        background 0.3s;
+}
+
+.companion-metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.companion-metric {
+    font-size: 0.82rem;
+    padding: 0.35rem 0.75rem;
+    border-radius: 999px;
+    background: rgba(90, 55, 25, 0.05);
+    color: var(--ink-light);
+    border: 1px solid var(--border);
+}
+
+.companion-advice {
+    font-family: "Lora", Georgia, serif;
+    font-style: italic;
+    font-size: 0.95rem;
+    color: var(--ink-light);
+    line-height: 1.6;
+    margin: 0;
+}
+
+/* Controls */
+.companion-controls {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: center;
+}
+
+.companion-mic-btn {
+    flex: 1;
+    justify-content: center;
+    padding: 1rem;
+    font-size: 1rem;
+    border-radius: 12px;
+}
+
+/* History */
+.companion-history {
+    margin-top: 0.5rem;
+}
+
+.companion-history-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--ink-very-light);
+    margin-bottom: 0.75rem;
+    letter-spacing: 0.05em;
+}
+
+.companion-history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.companion-history-item {
+    display: grid;
+    grid-template-columns: 3.5rem 1fr 3rem 5rem;
+    gap: 0.5rem;
+    align-items: center;
+    padding: 0.6rem 0.8rem;
+    background: var(--paper-light);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--item-color, var(--border));
+    border-radius: 8px;
+    font-size: 0.85rem;
+}
+
+.history-time {
+    color: var(--ink-very-light);
+    font-size: 0.75rem;
+}
+.history-level {
+    font-weight: 500;
+    color: var(--ink);
+}
+.history-prob {
+    text-align: right;
+    color: var(--warm-dark);
+    font-weight: 600;
+}
+.history-emotion {
+    text-align: right;
+    color: var(--ink-very-light);
+    font-style: italic;
+    font-family: "Lora", serif;
+}
+
+/* Footer */
+.companion-footer {
+    text-align: center;
+    font-size: 0.75rem;
+    color: var(--ink-very-light);
+    margin-top: 0.5rem;
+    font-family: "Inter", sans-serif;
+}
+
+/* ── Responsive tweaks ── */
+@media (max-width: 380px) {
+    .companion-app {
+        padding: 0.75rem;
+    }
+    .companion-visualizer {
+        height: 180px;
+    }
+    .companion-history-item {
+        grid-template-columns: 3rem 1fr 2.5rem;
+    }
+    .history-emotion {
+        display: none;
+    }
+}

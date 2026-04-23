@@ -4,6 +4,7 @@
 # Keep your specific paths for the USB stick
 LLAMA_DIR="/media/copper/USB_STICK/Git/llama.cpp/build/bin/"
 MODEL_PATH="/media/copper/USB_STICK/Models/LFM2.5-1.2B-Instruct-Q8_0.gguf"
+Model_path2='/media/copper/USB_STICK/Models/gemma-4-E2B-it-UD-Q4_K_XL.gguf'
 
 # ✅ CHANGED: Point to the new location of the python module
 # We don't point to a file anymore; we run the module name

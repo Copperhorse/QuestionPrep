@@ -1,23 +1,10 @@
 """
 main.py — QuestionPrep FastAPI Backend (Orchestrator)
-
-Fixes applied:
-  OPT  - Removed dead `analyze_disfluencies` import.  The function is only ever
-         called inside SpeechToText.transcribe_and_analyze(); importing it here
-         at the top level added an unused name to the module namespace.
-
-  RACE - end_session() nulled _stt without holding _stt_lock.  If a thread pool
-         worker had already passed the outer `if _stt is None` guard in get_stt()
-         (seeing a loaded model) and end_session then set _stt = None from the
-         async event loop, a second concurrent request could trigger a redundant
-         model re-load — or worse, the worker could use a partially torn-down
-         object.  Fixed by acquiring _stt_lock inside end_session before
-         assigning None, matching the double-checked locking pattern used by
-         get_stt() itself.
-"""
+uv run uvicorn apps.orchestrator.main:app --reload"""
 
 import asyncio
 import logging
+import mimetypes
 import os
 import subprocess
 import threading
@@ -26,6 +13,13 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Dict, Optional, Set
+
+from fastapi.responses import FileResponse
+
+# Ensure .mjs files are served with correct MIME type
+mimetypes.add_type("application/javascript", ".mjs")
+mimetypes.add_type("application/wasm", ".wasm")
+
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
@@ -486,11 +480,22 @@ def run_enrichment_task(file_id: str):
 # ==========================================
 # PAGE ROUTES (HTML)
 # ==========================================
+@app.get("/companion", response_class=HTMLResponse)
+async def get_companion_page(request: Request):
+    return templates.TemplateResponse("companion.html", {"request": request})
 
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
+
+
+@app.get("/sw.js")
+async def service_worker():
+    return FileResponse(
+        BASE_DIR / "sw.js",  # ← was "static" / "js" / "sw.js"
+        media_type="application/javascript",
+    )
 
 
 @app.get("/login", response_class=HTMLResponse)

@@ -1,27 +1,48 @@
 """
-speech_to_text.py
+Speech-to-Text + Disfluency Detection
+---------------------------------------
+Uses Qwen3 ASR to transcribe audio and counts disfluency markers
+to flag stuttering/hesitation as a stress signal.
+
+Supports:
+    - Raw PCM bytes (from client WebSocket stream)
+    - .opus/.webm files (converted via ffmpeg before transcription)
+
+Requirements:
+    pip install qwen-asr torch numpy soundfile
+    sudo apt install ffmpeg
 
 Fixes applied:
-  B14 - The __main__ test block printed result['repetitions'], but
-        analyze_disfluencies() returns three separate keys:
-          adjacent_repetitions, windowed_repetitions, phrase_repetitions.
-        Running the file directly threw a KeyError. Fixed to print all three keys.
+  FIX1 - 'import soundfile as sf' was deferred inside _transcribe_array().
+         A missing soundfile package only surfaced at inference time (first
+         live transcription call) instead of at startup, making the root
+         cause very hard to diagnose.  Moved to the module-level imports so
+         the error is raised immediately when the module is loaded.
 
-  OPT - decode_opus_bytes() previously wrote opus bytes to a NamedTemporaryFile
-        so that ffmpeg could read from disk, which consumed an unnecessary file
-        descriptor and added I/O latency.  Replaced with a pipe-based approach:
-        ffmpeg reads from stdin (pipe:0) and the temp file is eliminated entirely.
-        A fallback to the old temp-file path is retained for formats that ffmpeg
-        cannot demux from a non-seekable pipe (e.g. some MPEG-TS containers).
+  FIX2 - decode_opus_bytes() wrote the browser audio to a temp file with
+         suffix='.opus'.  The browser's MediaRecorder produces audio/webm
+         (Chrome) or audio/ogg (Firefox), not a bare Opus stream.  Some
+         ffmpeg builds use the filename extension as a format hint, causing
+         a decode failure.  Changed to suffix='.webm'.  ffmpeg auto-detects
+         the actual container from magic bytes, so this works for both WebM
+         and Ogg audio.
+
+  FIX3 - Added a pipe-based fast path to decode_opus_bytes().  ffmpeg can
+         read directly from stdin for most containers, avoiding a temp-file
+         round-trip.  The disk path (FIX2) is retained as a fallback for
+         containers (like some Matroska/WebM variants) that require seeking.
+
+  B14  - __main__ test block printed result['repetitions'], a key that does
+         not exist.  Fixed to print all three separate repetition keys.
 """
 
-import io
 import re
 import subprocess
 import tempfile
 from pathlib import Path
 
 import numpy as np
+import soundfile as sf  # FIX1: module-level — ImportError surfaces at startup, not mid-call
 import torch
 from qwen_asr import Qwen3ASRModel
 
@@ -52,9 +73,13 @@ FALSE_START_RE = re.compile(r"\b[a-z]-\w+\b", re.IGNORECASE)
 ADJACENT_RE = re.compile(r"\b(\w+)\s+\1\b", re.IGNORECASE)
 
 DISFLUENCY_THRESHOLD = 0.10
-
 MIN_REPEAT_WORD_LEN = 3
 REPETITION_WINDOW = 8
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  REPETITION HELPERS
+# ══════════════════════════════════════════════════════════════════════════════
 
 
 def count_adjacent_repetitions(words: list) -> int:
@@ -96,14 +121,28 @@ def count_phrase_repetitions(words: list) -> int:
     return count
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+#  DISFLUENCY ANALYSIS
+# ══════════════════════════════════════════════════════════════════════════════
+
+
 def analyze_disfluencies(transcript: str) -> dict:
     """
-    Count disfluency markers and return a summary dict.
+    Count disfluency markers in a transcript and return a summary dict.
 
-    Keys returned:
-        total_words, filled_pauses, prolongations, false_starts,
-        adjacent_repetitions, windowed_repetitions, phrase_repetitions,
-        total_disfluencies, disfluency_rate, stutter_flag
+    Returns:
+        {
+            "total_words":          int,
+            "filled_pauses":        int,
+            "prolongations":        int,
+            "false_starts":         int,
+            "adjacent_repetitions": int,
+            "windowed_repetitions": int,
+            "phrase_repetitions":   int,
+            "total_disfluencies":   int,
+            "disfluency_rate":      float,
+            "stutter_flag":         bool,
+        }
     """
     if not transcript or not transcript.strip():
         return {
@@ -160,6 +199,11 @@ def analyze_disfluencies(transcript: str) -> dict:
     }
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+#  AUDIO DECODING
+# ══════════════════════════════════════════════════════════════════════════════
+
+
 def _pcm_from_stdout(stdout: bytes) -> np.ndarray:
     """Convert raw s16le PCM bytes (ffmpeg output) to a float32 numpy array."""
     pcm = np.frombuffer(stdout, dtype=np.int16)
@@ -167,13 +211,16 @@ def _pcm_from_stdout(stdout: bytes) -> np.ndarray:
 
 
 def decode_opus_bytes(opus_bytes: bytes, sample_rate: int = 16000) -> np.ndarray:
-    """Decode opus/webm bytes to a float32 PCM array.
-
-    OPT: Tries to feed the bytes directly to ffmpeg via stdin (pipe:0 → pipe:1)
-    to avoid writing a temp file.  Falls back to the temp-file path for
-    containers that ffmpeg cannot demux from a non-seekable stream.
     """
-    _FFMPEG_PCM_ARGS = [
+    Decode browser audio bytes (WebM/Ogg container) to a float32 PCM array.
+
+    FIX3: Tries a pipe-based fast path first (no temp file I/O).
+    FIX2: Falls back to a temp file with suffix='.webm' (was '.opus').
+          The browser sends a WebM or Ogg container, not a bare Opus stream.
+          ffmpeg auto-detects from magic bytes, but '.opus' misled some builds
+          into skipping container demuxing entirely.
+    """
+    _FFMPEG_ARGS = [
         "-vn",
         "-acodec",
         "pcm_s16le",
@@ -188,7 +235,7 @@ def decode_opus_bytes(opus_bytes: bytes, sample_rate: int = 16000) -> np.ndarray
 
     # ── Fast path: pipe bytes straight into ffmpeg stdin ─────────────────────
     result = subprocess.run(
-        ["ffmpeg", "-y", "-i", "pipe:0"] + _FFMPEG_PCM_ARGS,
+        ["ffmpeg", "-y", "-i", "pipe:0"] + _FFMPEG_ARGS,
         input=opus_bytes,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -196,14 +243,15 @@ def decode_opus_bytes(opus_bytes: bytes, sample_rate: int = 16000) -> np.ndarray
     if result.returncode == 0 and result.stdout:
         return _pcm_from_stdout(result.stdout)
 
-    # ── Fallback: write to a temp file (required by some containers) ─────────
-    with tempfile.NamedTemporaryFile(suffix=".opus", delete=False) as tmp_in:
+    # ── Fallback: write to a temp file ────────────────────────────────────────
+    # FIX2: suffix changed from '.opus' to '.webm'
+    with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as tmp_in:
         tmp_in.write(opus_bytes)
         tmp_in_path = tmp_in.name
 
     try:
         result = subprocess.run(
-            ["ffmpeg", "-y", "-i", tmp_in_path] + _FFMPEG_PCM_ARGS,
+            ["ffmpeg", "-y", "-i", tmp_in_path] + _FFMPEG_ARGS,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
         )
@@ -240,6 +288,11 @@ def decode_opus_file(file_path: str, sample_rate: int = 16000) -> np.ndarray:
     return pcm.astype(np.float32) / 32768.0
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+#  SPEECH TO TEXT CLASS
+# ══════════════════════════════════════════════════════════════════════════════
+
+
 class SpeechToText:
     def __init__(self):
         self.model = Qwen3ASRModel.from_pretrained(
@@ -248,11 +301,9 @@ class SpeechToText:
         self.audio_buffer = []
 
     def _transcribe_array(self, audio_np: np.ndarray, sample_rate: int = 16000) -> str:
-        import soundfile as sf
-
+        # FIX1: soundfile is now imported at module level, not here.
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             tmp_path = tmp.name
-
         try:
             sf.write(tmp_path, audio_np, sample_rate, subtype="PCM_16")
             result = self.model.transcribe(audio=tmp_path, language="English")
@@ -285,6 +336,11 @@ class SpeechToText:
         }
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+#  STRESS LEVEL COMBINER
+# ══════════════════════════════════════════════════════════════════════════════
+
+
 def combine_stress_signals(model_stressed: bool, stutter_flag: bool) -> dict:
     if model_stressed and stutter_flag:
         return {
@@ -308,6 +364,10 @@ def combine_stress_signals(model_stressed: bool, stutter_flag: bool) -> dict:
         }
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+#  QUICK TEST
+# ══════════════════════════════════════════════════════════════════════════════
+
 if __name__ == "__main__":
     test_transcripts = [
         "Um I was just, uh, thinking that maybe we could, you know, try a different approach",
@@ -322,8 +382,7 @@ if __name__ == "__main__":
         print(f"\nTranscript : {t}")
         print(f"Rate       : {result['disfluency_rate']:.2%}")
         print(f"Stutter    : {result['stutter_flag']}")
-        # B14: was result['repetitions'] — that key does not exist.
-        # The dict has three separate repetition keys:
+        # B14 FIX: was result['repetitions'] — key doesn't exist
         print(
             f"Details    : pauses={result['filled_pauses']} "
             f"prolongations={result['prolongations']} "
