@@ -29,11 +29,26 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
 
-  // Bypass Service Worker for WASM and MJS files — let browser handle them directly
-  if (url.pathname.endsWith(".wasm") || url.pathname.endsWith(".mjs")) {
+  // Bypass Service Worker  MJS files — let browser handle them directly
+  if (url.pathname.endsWith(".mjs")) {
     return; // Don't call e.respondWith — let browser fetch normally
   }
-
+  if (url.pathname.endsWith(".wasm")) {
+    e.respondWith(
+      caches.open("stresscheck-wasm-v1").then((cache) =>
+        cache.match(e.request).then((cached) => {
+          if (cached) {
+            console.log("[SW] WASM served from pre-cache:", url.pathname);
+            return cached;
+          }
+          // First visit or cache miss — network fetch (normal browser behavior)
+          console.log("[SW] WASM not in cache yet, fetching from network");
+          return fetch(e.request);
+        }),
+      ),
+    );
+    return;
+  }
   if (url.pathname === "/companion") {
     e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
     return;

@@ -75,7 +75,7 @@ try {
 
     async init() {
       if (this._worker) return;
-
+      await this._preloadWasm();
       this._worker = new Worker(this.workerPath);
 
       this._readyPromise = new Promise((resolve, reject) => {
@@ -102,7 +102,52 @@ try {
 
       await this._readyPromise;
     }
+    async _preloadWasm() {
+      if (!("caches" in self)) {
+        Log.warn("Cache API not available — WASM will not be pre-cached");
+        return;
+      }
 
+      const WASM_CACHE = "stresscheck-wasm-v1";
+      const wasmUrl = "/static/js/ort-wasm-simd-threaded.wasm";
+
+      try {
+        const cache = await caches.open(WASM_CACHE);
+        const cached = await cache.match(wasmUrl);
+
+        if (cached) {
+          Log.main("WASM already in cache — skipping pre-fetch");
+          return;
+        }
+
+        Log.main("Pre-fetching WASM for offline support…");
+        const response = await fetch(wasmUrl);
+
+        if (!response.ok) {
+          Log.warn(`WASM pre-fetch failed: HTTP ${response.status}`);
+          return;
+        }
+
+        // Important: check Content-Type is application/wasm before caching.
+        // If the server sends the wrong type, streaming compilation will break
+        // when served from cache.
+        const ct = response.headers.get("content-type") || "";
+        if (
+          !ct.includes("application/wasm") &&
+          !ct.includes("application/octet-stream")
+        ) {
+          Log.warn(
+            `WASM Content-Type is '${ct}' — expected application/wasm. Caching anyway but verify your server config.`,
+          );
+        }
+
+        await cache.put(wasmUrl, response);
+        Log.main("WASM pre-cached successfully for offline use");
+      } catch (err) {
+        // Non-fatal — WASM will be fetched from network on next use
+        Log.warn(`WASM pre-cache failed (non-fatal): ${err.message}`);
+      }
+    }
     waitUntilReady() {
       if (this._ready) return Promise.resolve();
       if (this._readyPromise) return this._readyPromise;
