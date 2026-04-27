@@ -250,7 +250,8 @@ class LLMClient:
                 messages=[
                     {"role": "system", "content": sys_prompt},
                     {"role": "user", "content": user_prompt},
-                    {"role": "assistant", "content": "{"},
+                    # Removed the assistant prefill dict to prevent conflicts with
+                    # llama-cpp's thinking tokens.
                 ],
                 temperature=0.1,
                 # top_k and repetition_penalty are llama-server extensions —
@@ -263,16 +264,10 @@ class LLMClient:
             )
             content = response.choices[0].message.content
 
-            # B16: Some backends echo the assistant prefill back into the response.
-            # If the content already starts with '{', prepending another '{' produces
-            # '{{...}' which is invalid JSON. Check before prepending.
-            content_stripped = content.lstrip()
-            if content_stripped.startswith("{"):
-                raw_content = content_stripped
-            else:
-                raw_content = "{" + content
+            # Pass the content directly to the robust extractor, which will
+            # bypass any <think> tags and grab the JSON.
+            return self._extract_json(content)
 
-            return self._extract_json(raw_content)
         except Exception as e:
             logger.error(f"LLM Error: {e}")
             return {}

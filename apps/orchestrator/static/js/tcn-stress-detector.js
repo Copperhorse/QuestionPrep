@@ -185,20 +185,22 @@ try {
       });
     }
 
-    async startListening() {
+    async startListening(externalStream = null) {
       if (!this._ready)
         throw new Error("[TcnStressDetector] Call init() first");
       if (this._stream) return;
 
-      this._stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          sampleRate: this.targetSR,
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      this._stream =
+        externalStream ||
+        (await navigator.mediaDevices.getUserMedia({
+          audio: {
+            sampleRate: this.targetSR,
+            channelCount: 1,
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        }));
 
       this._audioCtx = new (window.AudioContext || window.webkitAudioContext)({
         sampleRate: this.targetSR,

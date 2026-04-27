@@ -352,7 +352,7 @@ async function fetchUserFiles() {
                   onclick="generateQuestions('${fileId}', this)">
             ${icon("sparkles")} Generate Questions
           </button>
-          <a href="/interview" class="btn btn-primary btn-sm"
+          <a href="/interview?file_id=${fileId}" class="btn btn-primary btn-sm"
              style="justify-content:center;text-align:center;">
             ${icon("play")} Start Interview
           </a>

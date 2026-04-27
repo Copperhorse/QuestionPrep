@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Session Results</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap"
+            rel="stylesheet"
+        />
+        <link rel="stylesheet" href="/static/css/styles.css" />
+        <script src="/static/theme.js"></script>
+        <style>
+            .session-hero {
+                padding: 3.5rem 0 2rem;
+                text-align: center;
+            }
+            .session-summary {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 1.25rem;
+                margin-bottom: 3rem;
+            }
+            .session-summary-card {
+                text-align: center;
+                padding: 1.8rem 1rem;
+            }
+            .session-summary-value {
+                font-family: "Playfair Display", serif;
+                font-size: 2.2rem;
+                font-weight: 600;
+                color: var(--warm);
+            }
+            .session-summary-label {
+                font-family: "DM Mono", monospace;
+                font-size: 0.7rem;
+                text-transform: uppercase;
+                letter-spacing: 0.12em;
+                color: var(--ink-very-light);
+                margin-top: 0.5rem;
+            }
+            .result-card {
+                margin-bottom: 1.75rem;
+            }
+            .result-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 1.2rem;
+                padding-bottom: 0.75rem;
+                border-bottom: 1px solid var(--border);
+            }
+            .result-number {
+                font-family: "DM Mono", monospace;
+                font-size: 0.75rem;
+                color: var(--warm);
+                letter-spacing: 0.05em;
+            }
+            .result-score {
+                font-family: "Playfair Display", serif;
+                font-size: 1.35rem;
+                font-weight: 600;
+            }
+            .result-section {
+                margin: 1.1rem 0;
+            }
+            .result-section-label {
+                font-family: "DM Mono", monospace;
+                font-size: 0.62rem;
+                text-transform: uppercase;
+                letter-spacing: 0.12em;
+                color: var(--ink-very-light);
+                margin-bottom: 0.35rem;
+            }
+            .result-text {
+                color: var(--ink-light);
+                line-height: 1.75;
+                font-size: 0.95rem;
+            }
+            .result-text.user-answer {
+                font-style: italic;
+                color: var(--ink);
+            }
+            .score-bar {
+                width: 100%;
+                height: 6px;
+                background: var(--paper-deep);
+                border-radius: 999px;
+                overflow: hidden;
+                margin-top: 0.6rem;
+            }
+            .score-fill {
+                height: 100%;
+                border-radius: 999px;
+                transition: width 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+            }
+            .feedback-box {
+                background: rgba(255, 255, 255, 0.03);
+                border-left: 3px solid var(--warm);
+                padding: 1rem 1.2rem;
+                margin-top: 1rem;
+                border-radius: 0 var(--radius) var(--radius) 0;
+            }
+            .feedback-box p {
+                margin: 0;
+                font-style: italic;
+                color: var(--ink-light);
+                font-family: "Playfair Display", serif;
+                font-size: 0.95rem;
+                line-height: 1.7;
+            }
+            .empty-state {
+                text-align: center;
+                padding: 5rem 2rem;
+                color: var(--ink-very-light);
+            }
+            .loading {
+                text-align: center;
+                padding: 5rem;
+                color: var(--ink-very-light);
+                font-style: italic;
+                font-family: "Playfair Display", serif;
+            }
+            @media (max-width: 640px) {
+                .session-summary {
+                    grid-template-columns: 1fr;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <nav class="site-nav">
+            <div class="container">
+                <a href="/" class="nav-brand">QuestionPrep</a>
+                <div class="nav-links">
+                    <a href="/profile" class="btn btn-outline btn-sm"
+                        >Back to Profile</a
+                    >
+                </div>
+            </div>
+        </nav>
+
+        <section class="page-section">
+            <div class="container" style="max-width: 900px">
+                <div class="session-hero">
+                    <h1>Session Results</h1>
+                    <p class="page-subtitle">
+                        Review every question, your answer, the reference, and
+                        how closely they aligned.
+                    </p>
+                </div>
+
+                <div id="loading-state" class="loading">
+                    Loading your session results…
+                </div>
+
+                <div id="error-state" class="empty-state" style="display: none">
+                    <p>
+                        Could not load session results. The session may have
+                        expired or been removed.
+                    </p>
+                    <a href="/profile" class="btn btn-primary mt-2"
+                        >Back to Profile</a
+                    >
+                </div>
+
+                <div id="results-container" style="display: none">
+                    <div class="session-summary">
+                        <div class="card session-summary-card">
+                            <div
+                                class="session-summary-value"
+                                id="summary-count"
+                            >
+                                0
+                            </div>
+                            <div class="session-summary-label">Questions</div>
+                        </div>
+                        <div class="card session-summary-card">
+                            <div class="session-summary-value" id="summary-avg">
+                                0%
+                            </div>
+                            <div class="session-summary-label">
+                                Average Score
+                            </div>
+                        </div>
+                        <div class="card session-summary-card">
+                            <div
+                                class="session-summary-value"
+                                id="summary-diff"
+                            >
+                                —
+                            </div>
+                            <div class="session-summary-label">
+                                Final Difficulty
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="results-list"></div>
+
+                    <div class="text-center mt-3 mb-3">
+                        <a
+                            href="/interview"
+                            class="btn btn-primary btn-lg"
+                            style="margin-right: 0.75rem"
+                            >Start New Session</a
+                        >
+                        <a href="/profile" class="btn btn-dark btn-lg"
+                            >Back to Profile</a
+                        >
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <script>
+            const params = new URLSearchParams(window.location.search);
+            const sessionId = params.get("sid");
+
+            function scoreColor(score) {
+                if (score >= 0.65) return "var(--success)";
+                if (score >= 0.45) return "var(--warning)";
+                return "var(--danger)";
+            }
+            function scoreLabel(score) {
+                if (score >= 0.65) return "Good";
+                if (score >= 0.45) return "Fair";
+                return "Needs Improvement";
+            }
+
+            async function loadResults() {
+                if (!sessionId) {
+                    document.getElementById("loading-state").style.display =
+                        "none";
+                    document.getElementById("error-state").style.display =
+                        "block";
+                    return;
+                }
+                try {
+                    const res = await fetch(
+                        `/api/interview/${sessionId}/summary`,
+                    );
+                    if (!res.ok) throw new Error("Not found");
+                    const data = await res.json();
+
+                    document.getElementById("loading-state").style.display =
+                        "none";
+                    document.getElementById("results-container").style.display =
+                        "block";
+
+                    document.getElementById("summary-count").textContent =
+                        data.questions_attempted || 0;
+                    document.getElementById("summary-avg").textContent =
+                        ((data.average_similarity || 0) * 100).toFixed(0) + "%";
+                    document.getElementById("summary-diff").textContent =
+                        data.final_difficulty || "—";
+
+                    const list = document.getElementById("results-list");
+                    const history = data.detailed_history || [];
+
+                    history.forEach((item, idx) => {
+                        const similarity = item.similarity || 0;
+                        const pct = (similarity * 100).toFixed(0);
+                        const color = scoreColor(similarity);
+                        const card = document.createElement("div");
+                        card.className = "card result-card";
+                        card.innerHTML = `
+                        <div class="result-header">
+                            <span class="result-number">Question ${idx + 1}</span>
+                            <span class="result-score" style="color:${color}">
+                                ${pct}%
+                                <span style="font-size:0.75rem;color:var(--ink-very-light);font-family:'DM Sans',sans-serif;font-weight:400;margin-left:6px;">
+                                    (${scoreLabel(similarity)})
+                                </span>
+                            </span>
+                        </div>
+                        <div class="result-section">
+                            <div class="result-section-label">Question</div>
+                            <div class="result-text">${escapeHtml(item.question_text || "—")}</div>
+                        </div>
+                        <div class="result-section">
+                            <div class="result-section-label">Your Answer</div>
+                            <div class="result-text user-answer">${escapeHtml(item.user_answer || "—")}</div>
+                        </div>
+                        <div class="result-section">
+                            <div class="result-section-label">Reference Answer</div>
+                            <div class="result-text">${escapeHtml(item.reference_answer || "—")}</div>
+                        </div>
+                        <div class="score-bar">
+                            <div class="score-fill" style="width:${pct}%;background:${color};"></div>
+                        </div>
+                        ${
+                            item.feedback
+                                ? `
+                        <div class="feedback-box">
+                            <p>${escapeHtml(item.feedback)}</p>
+                        </div>`
+                                : ""
+                        }
+                    `;
+                        list.appendChild(card);
+                    });
+
+                    if (history.length === 0) {
+                        list.innerHTML =
+                            '<div class="empty-state"><p>No answers were recorded for this session.</p></div>';
+                    }
+                } catch (err) {
+                    console.error("Failed to load session results:", err);
+                    document.getElementById("loading-state").style.display =
+                        "none";
+                    document.getElementById("error-state").style.display =
+                        "block";
+                }
+            }
+
+            function escapeHtml(text) {
+                const div = document.createElement("div");
+                div.appendChild(document.createTextNode(text));
+                return div.innerHTML;
+            }
+
+            loadResults();
+        </script>
+    </body>
+</html>

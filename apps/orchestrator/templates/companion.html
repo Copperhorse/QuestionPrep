@@ -14,7 +14,7 @@
         />
         <meta name="apple-mobile-web-app-title" content="StressCheck" />
 
-        <title>StressCheck — Companion</title>
+        <title>StressCheck</title>
         <link rel="manifest" href="/static/manifest.json" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -203,18 +203,8 @@
             let detector = null;
             let audioMotion = null;
             let micStream = null;
-            let mediaRecorder = null;
-            let audioChunks = [];
             let sessionHistory = [];
             let isRecording = false;
-
-            const RECORDER_MIME_TYPE =
-                [
-                    "audio/webm;codecs=opus",
-                    "audio/webm",
-                    "audio/ogg;codecs=opus",
-                    "audio/ogg",
-                ].find((t) => MediaRecorder.isTypeSupported(t)) ?? "";
 
             const ADVICE = {
                 not_stressed: "You're sounding calm and composed. Great job!",
@@ -249,10 +239,15 @@
                     );
                     return false;
                 }
+                // 5-second windows, non-overlapping (result every 5s).
+                // Change overlapSeconds to 4 if you want a result every 1s.
                 detector = new window.TcnStressDetector({
                     modelPath: "/static/models/tcn_audio_model.onnx",
                     wasmDir: "/static/js/",
                     workerPath: "/static/js/tcn-worker.js",
+                    clipSeconds: 5,
+                    overlapSeconds: 0,
+                    targetSR: 16000,
                 });
                 try {
                     setStatus("loading", "Loading TCN model…");
@@ -309,85 +304,79 @@
                 audioMotion.disconnectOutput();
             }
 
+            function triggerHaptics(level) {
+                if (!navigator.vibrate) return;
+
+                const patterns = {
+                    not_stressed: [],
+                    mild: [100],
+                    stressed: [200, 100, 200],
+                    highly_stressed: [300, 100, 300, 100, 300],
+                };
+
+                const pattern = patterns[level];
+                if (pattern && pattern.length > 0) {
+                    navigator.vibrate(pattern);
+                }
+            }
+
             async function startRecording() {
+                if (isRecording) return;
                 if (!detector?._ready) {
                     alert("Model not ready yet. Please wait.");
                     return;
                 }
-                initVisualizer();
+
                 try {
                     micStream = await navigator.mediaDevices.getUserMedia({
                         audio: {
-                            noiseSuppression: true,
+                            sampleRate: 16000,
+                            channelCount: 1,
                             echoCancellation: true,
-                            autoGainControl: false,
+                            noiseSuppression: true,
+                            autoGainControl: true,
                         },
                         video: false,
                     });
+
+                    initVisualizer();
                     const micNode =
                         audioMotion.audioCtx.createMediaStreamSource(micStream);
                     audioMotion.connectInput(micNode);
 
-                    audioChunks = [];
-                    mediaRecorder = new MediaRecorder(
-                        micStream,
-                        RECORDER_MIME_TYPE
-                            ? { mimeType: RECORDER_MIME_TYPE }
-                            : {},
-                    );
-                    mediaRecorder.ondataavailable = (e) => {
-                        if (e.data.size > 0) audioChunks.push(e.data);
-                    };
-                    mediaRecorder.onstop = async () => {
-                        const blobType = RECORDER_MIME_TYPE || "audio/webm";
-                        const audioBlob = new Blob(audioChunks, {
-                            type: blobType,
-                        });
-                        await analyzeOffline(audioBlob);
+                    // Real-time callback: fires every 5 seconds (clipSeconds)
+                    detector.onResult = (result) => {
+                        showResult(result);
+                        addToHistory(result);
+                        triggerHaptics(result.stressLevel);
                     };
 
-                    mediaRecorder.start(100);
+                    await detector.startListening(micStream);
+
                     isRecording = true;
                     micPrompt.style.display = "none";
                     micBtn.style.display = "none";
                     stopBtn.style.display = "flex";
-                    setStatus("recording", "Listening…");
+                    setStatus("recording", "Listening… analyzing every 5s");
                     resultCard.style.display = "none";
                 } catch (err) {
                     console.error(err);
-                    alert("Microphone access denied.");
+                    alert("Microphone access denied or failed: " + err.message);
                 }
             }
 
             function stopRecording() {
-                if (mediaRecorder?.state !== "inactive") mediaRecorder.stop();
-                micStream?.getTracks().forEach((t) => t.stop());
+                detector.onResult = null;
+                detector.stopListening();
+
                 audioMotion?.disconnectInput();
+
                 micStream = null;
                 isRecording = false;
                 micPrompt.style.display = "flex";
                 micBtn.style.display = "flex";
                 stopBtn.style.display = "none";
-                setStatus("analyzing", "Analyzing…");
-            }
-
-            async function analyzeOffline(audioBlob) {
-                try {
-                    const arrayBuffer = await audioBlob.arrayBuffer();
-                    const audioCtx = new AudioContext({ sampleRate: 16000 });
-                    const decoded = await audioCtx.decodeAudioData(arrayBuffer);
-                    await audioCtx.close();
-                    const float32Audio = decoded.getChannelData(0);
-
-                    const result = await detector.analyseClip(float32Audio);
-
-                    showResult(result);
-                    addToHistory(result);
-                    setStatus("ready", "Ready — tap mic to start");
-                } catch (err) {
-                    console.error(err);
-                    setStatus("error", `Analysis failed: ${err.message}`);
-                }
+                setStatus("ready", "Ready — tap mic to start");
             }
 
             function showResult(result) {

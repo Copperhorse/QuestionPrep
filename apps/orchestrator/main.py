@@ -5,6 +5,7 @@ uv run uvicorn apps.orchestrator.main:app --reload
 ds"""
 
 import asyncio
+import json
 import logging
 import mimetypes
 import os
@@ -13,6 +14,7 @@ import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Set
 
@@ -386,6 +388,7 @@ class GenerateRequest(BaseModel):
 
 class StartInterviewRequest(BaseModel):
     user_id: str
+    file_id: Optional[str] = None  # Add this line
 
 
 class TTSRequest(BaseModel):
@@ -608,6 +611,11 @@ async def list_user_files(user_id: str):
     return {"files": db.get_files_for_user(user_id)}
 
 
+@app.get("/session", response_class=HTMLResponse)
+async def get_session_page(request: Request):
+    return templates.TemplateResponse("session.html", {"request": request})
+
+
 @app.delete("/api/files/{file_id}")
 async def delete_file(file_id: str, user_id: str):
     """Delete a file and its Chroma embeddings. B12 handled here."""
@@ -641,7 +649,10 @@ async def start_interview(req: StartInterviewRequest):
 
     session_id = str(uuid.uuid4())
     session = InterviewSession(
-        session_id=session_id, user_id=req.user_id, db_path=str(DB_PATH)
+        session_id=session_id,
+        user_id=req.user_id,
+        db_path=str(DB_PATH),
+        file_id=req.file_id,  # Pass it into the session
     )
     first_question = session.start_interview()
 
@@ -685,45 +696,97 @@ async def get_session_status(session_id: str):
 @app.get("/api/interview/{session_id}/summary")
 async def get_summary(session_id: str):
     session = active_sessions.get(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    if session:
+        history = session.ctx.history
+        avg_score = (
+            sum(r.similarity for r in history) / len(history) if history else 0.0
+        )
+        detailed = []
+        for r in history:
+            q = session.logic.questions.get(r.question_id)
+            detailed.append(
+                {
+                    "question_id": r.question_id,
+                    "question_text": q.text if q else None,
+                    "reference_answer": q.answer if q else None,
+                    "user_answer": r.user_text,
+                    "similarity": r.similarity,
+                    "confidence": r.confidence,
+                    "feedback": r.feedback,
+                    "grader": r.grader,
+                }
+            )
+        return {
+            "questions_attempted": len(history),
+            "average_similarity": round(avg_score, 3),
+            "final_difficulty": session.ctx.difficulty_label,
+            "detailed_history": detailed,
+        }
 
-    history = session.ctx.history
-    avg_score = sum(r.similarity for r in history) / len(history) if history else 0.0
-    return {
-        "questions_attempted": len(history),
-        "average_similarity": round(avg_score, 3),
-        "final_difficulty": session.ctx.difficulty_label,
-        "detailed_history": [
-            {
-                "question_id": r.question_id,
-                "similarity": r.similarity,
-                "confidence": r.confidence,
-                "feedback": r.feedback,
-            }
-            for r in history
-        ],
-    }
+    # Fallback to archived results in DB
+    result = db.get_session_result(session_id)
+    if result:
+        return {
+            "questions_attempted": result["questions_attempted"],
+            "average_similarity": result["average_score"],
+            "final_difficulty": result["final_difficulty"],
+            "detailed_history": result["history"],
+        }
+
+    raise HTTPException(status_code=404, detail="Session not found")
 
 
 @app.delete("/api/interview/{session_id}")
 async def end_session(session_id: str):
     global _stt
-    if session_id in active_sessions:
-        del active_sessions[session_id]
-    _session_last_active.pop(session_id, None)  # B22: clean up TTL tracker
+    summary = None
+    session = active_sessions.get(session_id)
 
-    # RACE FIX: Previously _stt was set to None without holding _stt_lock.
-    # A thread pool worker running get_stt() could have already passed the
-    # outer `if _stt is None` check, then this async handler nulled the
-    # global, leading to a second concurrent model load or use of a
-    # partially freed object.
-    # Fix: acquire _stt_lock before reading/writing _stt here, mirroring
-    # the double-checked locking pattern used in get_stt() itself.
+    if session:
+        # Archive session results before deletion
+        history = session.ctx.history
+        avg_score = (
+            sum(r.similarity for r in history) / len(history) if history else 0.0
+        )
+        detailed = []
+        for r in history:
+            q = session.logic.questions.get(r.question_id)
+            detailed.append(
+                {
+                    "question_id": r.question_id,
+                    "question_text": q.text if q else None,
+                    "reference_answer": q.answer if q else None,
+                    "user_answer": r.user_text,
+                    "similarity": r.similarity,
+                    "confidence": r.confidence,
+                    "feedback": r.feedback,
+                    "grader": r.grader,
+                }
+            )
+        summary = {
+            "questions_attempted": len(history),
+            "average_similarity": round(avg_score, 3),
+            "final_difficulty": session.ctx.difficulty_label,
+            "detailed_history": detailed,
+        }
+        db.save_session_result(
+            session_id=session_id,
+            user_id=session.user_id,
+            start_time="",
+            end_time=datetime.now().isoformat(),
+            questions_attempted=len(history),
+            average_score=avg_score,
+            final_difficulty=session.ctx.difficulty_label,
+            history_json=json.dumps(detailed),
+        )
+        del active_sessions[session_id]
+
+    _session_last_active.pop(session_id, None)
+
     if not active_sessions and _stt is not None:
         with _stt_lock:
             if not active_sessions and _stt is not None:
-                _stt = None  # B30: assign None (safe now that we hold the lock)
+                _stt = None
                 logger.info("Qwen3 ASR model unloaded — no active sessions.")
                 await broadcast(
                     "[INFO] asr: ■ Qwen3 ASR model unloaded — no active sessions remain"
@@ -732,7 +795,7 @@ async def end_session(session_id: str):
     await broadcast(
         f"[INFO] sessions: ■ Session {session_id[:8]} ended ({len(active_sessions)} remaining)"
     )
-    return {"message": "Session ended"}
+    return {"message": "Session ended", "summary": summary}
 
 
 # ==========================================

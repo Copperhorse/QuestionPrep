@@ -827,7 +827,7 @@ class DBManager:
 
     def get_questions_for_file(self, file_id: str) -> List[Dict[str, Any]]:
         sql = """
-            SELECT q.question_id, q.chunk_id, q.question_text, q.answer_text,
+            SELECT q.question_id, q.chunk_id, c.file_id, q.question_text, q.answer_text,
                    q.source_quote, q.difficulty, q.question_type, e.tags
             FROM chunk_questions q
             JOIN chunks c ON q.chunk_id = c.chunk_id

@@ -86,6 +86,10 @@ CONFIDENCE_HINT = 0.60  # Above this → "aligns well" feedback
 QUOTE_MIN_CHARS = 40  # require substantive quotes
 NEUTRAL_FLOOR: float = float(os.environ.get("SCORING_NEUTRAL_FLOOR", "0.35"))
 MIN_LEXICAL_WORDS = 4  # answers shorter than this cannot pass via lexical alone
+
+# Length-ratio guard — flags suspicious answer lengths for penalty/override
+LENGTH_RATIO_MIN = 0.85  # below this → likely cutoff / incomplete
+LENGTH_RATIO_MAX = 1.50  # above this → likely rambling / hallucination
 # ── Logging ──────────────────────────────────────────────────────────────────
 # Do NOT call basicConfig here. When game_loop is imported by main.py, the root
 # logger is already configured (INFO). Calling basicConfig again would either be
@@ -173,6 +177,8 @@ class TurnResult:
     user_text: str
     similarity: float  # final adjusted score
     bi_score: float  # raw bi-encoder cosine before NLI adjustment
+    lexical_score: float  # bidirectional fuzzy lexical score
+    length_ratio: float  # len(user_text) / len(reference)
     confidence: float  # = similarity (kept for API compatibility)
     feedback: str
     grader: str = "lexical"
@@ -386,21 +392,29 @@ class LogicEngine:
                         cls._ce_loaded = True
         return cls._ce_model
 
-    def __init__(self, db_path, user_id: str):
+    def __init__(self, db_path, user_id: str, file_id: Optional[str] = None):
         self.db = DBManager(db_path)
         self.user_id = user_id
+        self.file_id = file_id  # Save it
         self.questions: Dict[str, QuestionObj] = {}
         self.by_difficulty: Dict[str, List[str]] = defaultdict(list)
         self._load_questions()
 
     def _load_questions(self):
-        rows = self.db.get_questions_for_user(self.user_id)
-        if not rows:
-            logger.warning(
-                f"No questions for user {self.user_id[:8]} — "
-                "ingest a PDF, enrich it, index it, and assign it to this user."
-            )
-            return
+        # Route logic based on whether we have a file_id
+        if self.file_id:
+            rows = self.db.get_questions_for_file(self.file_id)
+            if not rows:
+                logger.warning(f"No questions for file {self.file_id}")
+                return
+        else:
+            rows = self.db.get_questions_for_user(self.user_id)
+            if not rows:
+                logger.warning(
+                    f"No questions for user {self.user_id[:8]} — "
+                    "ingest a PDF, enrich it, index it, and assign it to this user."
+                )
+                return
         for r in rows:
             tags = r.get("tags", [])
             if isinstance(tags, str):
@@ -453,17 +467,21 @@ class LogicEngine:
 
     def _nli_score(self, user_text: str, reference: str) -> Optional[NLIResult]:
         """
-        Feed (user_text, reference) as a pair to the NLI cross-encoder.
+        Feed both (reference→user) and (user→reference) to the NLI cross-encoder
+        in a single batched predict() call, then apply priority logic:
 
-        The cross-encoder reads both texts *together* — unlike the bi-encoder which
-        encodes them independently. This lets it detect:
-          • Entailment:    user's answer logically supports the reference meaning
-          • Neutral:       on-topic but doesn't actually say what the reference says
-          • Contradiction: user's answer contradicts the reference
+          Priority 1 — Contradiction: checked on FWD direction only.
+            The reverse direction throws false-positive contradictions on paraphrases,
+            so we never use it for contradiction detection.
+          Priority 2 — Entailment: rewarded from EITHER direction.
+            A detailed answer that *contains* the reference entails it in the REV
+            direction; a paraphrase entails in the FWD direction.  Taking the
+            stronger entailment signal from either catches both.
+          Priority 3 — Neutral: default to FWD.
 
         Returns None if the model is not available.
 
-        Note on label order for cross-encoder/nli-MiniLM2-L6-H768:
+        Note on label order for cross-encoder/nli-deberta-v3-xsmall:
           index 0 = contradiction
           index 1 = entailment
           index 2 = neutral
@@ -472,14 +490,40 @@ class LogicEngine:
         if not model:
             return None
 
-        # predict() returns raw logits; softmax converts to probabilities
-        logits = model.predict([[user_text, reference]])[0]
-        probs = self._softmax(logits)
+        # Batch-predict both directions at once (one forward pass overhead)
+        logits = model.predict(
+            [
+                [reference, user_text],  # FWD: ref is premise, user is hypothesis
+                [user_text, reference],  # REV: user is premise, ref is hypothesis
+            ]
+        )
+
+        probs_fwd = self._softmax(logits[0])
+        probs_rev = self._softmax(logits[1])
+
+        # Priority 1: contradiction — FWD direction only (stricter, fewer false positives)
+        if probs_fwd[CE_LABEL_CONTRADICTION] >= CONTRADICTION_THRESHOLD:
+            best_probs = probs_fwd
+
+        # Priority 2: entailment — reward from either direction
+        elif (
+            probs_fwd[CE_LABEL_ENTAILMENT] >= ENTAILMENT_THRESHOLD
+            or probs_rev[CE_LABEL_ENTAILMENT] >= ENTAILMENT_THRESHOLD
+        ):
+            best_probs = (
+                probs_fwd
+                if probs_fwd[CE_LABEL_ENTAILMENT] >= probs_rev[CE_LABEL_ENTAILMENT]
+                else probs_rev
+            )
+
+        # Priority 3: neutral — fall back to FWD
+        else:
+            best_probs = probs_fwd
 
         return NLIResult(
-            p_contradiction=float(probs[CE_LABEL_CONTRADICTION]),
-            p_entailment=float(probs[CE_LABEL_ENTAILMENT]),
-            p_neutral=float(probs[CE_LABEL_NEUTRAL]),
+            p_contradiction=float(best_probs[CE_LABEL_CONTRADICTION]),
+            p_entailment=float(best_probs[CE_LABEL_ENTAILMENT]),
+            p_neutral=float(best_probs[CE_LABEL_NEUTRAL]),
         )
 
     @staticmethod
@@ -491,7 +535,11 @@ class LogicEngine:
     def _lexical_score(user_text: str, reference: str) -> float:
         if len(user_text.split()) < MIN_LEXICAL_WORDS:
             return 0.0  # too short to be a real answer; force to semantic stage
-        return fuzz.partial_ratio(user_text.lower(), reference.lower()) / 100.0
+        # Bidirectional: min of both directions catches prefix cutoffs and
+        # hallucinations that happen to embed the full reference as a substring.
+        score_fwd = fuzz.partial_ratio(user_text.lower(), reference.lower()) / 100.0
+        score_rev = fuzz.partial_ratio(reference.lower(), user_text.lower()) / 100.0
+        return min(score_fwd, score_rev)
 
     # ── NLI adjustment formula ────────────────────────────────────────────────
 
@@ -550,55 +598,84 @@ class LogicEngine:
 
         return max(0.0, min(1.0, adjusted)), reason
 
-    # ── Full three-stage pipeline ─────────────────────────────────────────────
+    # ── Full pipeline ─────────────────────────────────────────────────────────
 
     def analyze_response(self, q: QuestionObj, user_text: str) -> TurnResult:
-        # 1. INITIALIZE DEFAULTS AT THE TOP
-        grader_used = "lexical"
-        nli_result = None
-        similarity = 0.0
-        bi_score = 0.0
-
-        # ── Stage 1: Lexical ──────────────────────────────────────────────────
+        # 1. Lexical (bidirectional — always run, no shortcut)
         lexical_score = self._lexical_score(user_text, q.answer)
-        verdict, Reason = _quote_is_grounded(
+
+        # Length ratio guard
+        len_ratio = len(user_text) / max(len(q.answer), 1)
+        length_suspicious = not (LENGTH_RATIO_MIN <= len_ratio <= LENGTH_RATIO_MAX)
+
+        # Quote grounding check (is the full reference contained in the user text?)
+        quote_verdict, _quote_reason = _quote_is_grounded(
             quote=q.answer.lower(), content=user_text.lower()
         )
 
-        if verdict is True and lexical_score >= LEXICAL_PASS_THRESHOLD:
-            # Near-verbatim — skip model stages
-            similarity = lexical_score
-            bi_score = lexical_score
-            grader_used = "lexical"
-        else:
-            # ── Stage 2: Bi-encoder ───────────────────────────────────────────
-            bi_score = self._bi_encode_score(user_text, q.answer)
+        # 2. Bi-encoder (always run — no lexical shortcut)
+        bi_score = self._bi_encode_score(user_text, q.answer)
 
-            if bi_score < CE_MIN_BI_SCORE:
-                # Too low for CE to add useful signal
-                similarity = bi_score
-                grader_used = "bi-encoder"
-            else:
-                # ── Stage 3: Cross-encoder NLI ────────────────────────────────
-                nli_result = self._nli_score(user_text, q.answer)
+        # 3. Cross-encoder NLI (run if bi_score is high enough to add signal)
+        nli_result = None
+        if bi_score >= CE_MIN_BI_SCORE:
+            nli_result = self._nli_score(user_text, q.answer)
 
-                if nli_result is not None:
+        grader_used = "bi-encoder"
+        similarity = bi_score
+
+        if nli_result is not None:
+            max_nli_prob = max(
+                nli_result.p_entailment,
+                nli_result.p_neutral,
+                nli_result.p_contradiction,
+            )
+
+            if max_nli_prob >= 0.60:
+                # Neutral override: if the bi-encoder strongly believes it's correct
+                # but CE is merely "neutral", trust the bi-encoder.  A confident NLI
+                # neutral on a high-similarity answer is almost always a paraphrase
+                # the cross-encoder failed to resolve — don't let it tank the score.
+                if nli_result.p_neutral == max_nli_prob and bi_score >= 0.85:
+                    similarity = bi_score
+                    grader_used = "bi-encoder (CE neutral override)"
+                else:
                     similarity, _ = self._apply_nli_adjustment(bi_score, nli_result)
                     grader_used = "bi+ce"
-                else:
-                    # Fallback if CE fails/is unavailable
-                    similarity = bi_score
-                    grader_used = "bi-encoder"
+            else:
+                grader_used = "bi-encoder (CE ignored < 0.60)"
 
-        # ── Feedback ─────────────────────────────────────────────────────────
-        # Now 'similarity' is guaranteed to exist regardless of which path was taken
-        feedback = self._build_feedback(similarity, bi_score, nli_result)
+        # 4. Lexical override — ONLY for true verbatim copies
+        #    (lexical ≥ 0.95 AND length is sane AND reference is grounded in the answer)
+        is_verbatim = lexical_score >= 0.95 and not length_suspicious and quote_verdict
+        if is_verbatim:
+            if (
+                nli_result is None
+                or "ignored" in grader_used
+                or (nli_result is not None and nli_result.is_entailed)
+            ):
+                similarity = max(similarity, lexical_score)
+                grader_used = "lexical+bi+ce" if "ce" in grader_used else "lexical+bi"
+            # If CE says contradiction with high confidence, don't let lexical override
+
+        # 5. Length penalty — proportionally punishes incomplete / cut-off answers
+        if len_ratio < LENGTH_RATIO_MIN:
+            penalty = len_ratio / LENGTH_RATIO_MIN
+            similarity = similarity * penalty
+            grader_used += " (len penalty)"
+
+        # 6. Feedback
+        feedback = self._build_feedback(
+            similarity, bi_score, lexical_score, len_ratio, nli_result
+        )
 
         return TurnResult(
             question_id=q.id,
             user_text=user_text,
             similarity=similarity,
             bi_score=bi_score,
+            lexical_score=lexical_score,
+            length_ratio=len_ratio,
             confidence=similarity,
             feedback=feedback,
             grader=grader_used,
@@ -609,12 +686,28 @@ class LogicEngine:
     def _build_feedback(
         final_score: float,
         bi_score: float,
+        lexical_score: float,
+        len_ratio: float,
         nli: Optional[NLIResult],
     ) -> str:
         """
-        Generate specific feedback using all three signals when available,
-        or generic feedback when the CE wasn't available.
+        Generate specific feedback using all available signals.
+
+        Length-ratio feedback is checked first: an incomplete or bloated answer
+        gets guidance before NLI-based feedback, since the score is already
+        penalised and the feedback should explain why.
         """
+        # Length guard feedback (checked before NLI — score was already penalised)
+        if len_ratio < LENGTH_RATIO_MIN:
+            return (
+                "Your answer appears to be cut off or significantly shorter than expected. "
+                "Please provide a complete explanation."
+            )
+        if len_ratio > LENGTH_RATIO_MAX:
+            return (
+                "Your answer is substantially longer than the reference. "
+                "Please check that you have not introduced incorrect details."
+            )
         if nli is None:
             # Fallback: generic feedback from score alone
             if final_score < SIMILARITY_FLOOR:
@@ -670,10 +763,14 @@ class LogicEngine:
 
 
 class InterviewSession:
-    def __init__(self, session_id: str, user_id: str, db_path=None):
+    # Update init to accept file_id
+    def __init__(
+        self, session_id: str, user_id: str, db_path=None, file_id: Optional[str] = None
+    ):
         self.session_id = session_id
         self.user_id = user_id
-        self.logic = LogicEngine(db_path or DB_PATH, user_id)
+        # Pass file_id to the LogicEngine
+        self.logic = LogicEngine(db_path or DB_PATH, user_id, file_id)
         self.ctx = InterviewContext()
         self.used_ids: Set[str] = set()
         self.state = InterviewState.INIT
@@ -723,6 +820,8 @@ class InterviewSession:
             "evaluation": {
                 "similarity": result.similarity,
                 "bi_score": result.bi_score,
+                "lexical_score": result.lexical_score,
+                "length_ratio": result.length_ratio,
                 "confidence": result.confidence,
                 "feedback": result.feedback,
                 "grader": result.grader,

@@ -1,28 +1,24 @@
 /* =========================================
    interview.js — Interview Session Logic
-
+   (Silent evaluation version)
 ========================================= */
 
 const API_BASE = "";
 const SESSION_KEY = "qp_session_id";
-const DRAFT_KEY = "qp_draft_answer"; // UX3
+const DRAFT_KEY = "qp_draft_answer";
 
-// ── State ──────────────────────────────────────────────────────────────────────
 let sessionId = null;
 const userId = localStorage.getItem("qp_user_id");
-let _questionNumber = 0; // UX5
+let _questionNumber = 0;
 
-// ── DOM refs ───────────────────────────────────────────────────────────────────
 const chatContainer = document.querySelector(".chat-container");
 const chatForm = document.getElementById("chat-form");
 const answerTextarea = document.getElementById("answer-text");
 const endSessionBtn = document.getElementById("end-session-btn");
-let charCounterEl = null; // UX4: injected on DOMContentLoaded
+let charCounterEl = null;
 
-// ── Auth guard ─────────────────────────────────────────────────────────────────
 if (!userId) window.location.href = "/login";
 
-// ── HTML helpers ───────────────────────────────────────────────────────────────
 function escapeHtml(text) {
   const div = document.createElement("div");
   div.appendChild(document.createTextNode(text));
@@ -38,41 +34,16 @@ function appendMessage(role, html, extraStyle = "") {
   chatContainer.scrollTop = chatContainer.scrollHeight;
 }
 
-// B02 FIX: const arrow — not hoistable, eliminates the aliasing/stack-overflow
-// risk that the old function-declaration wrapper introduced.
 const appendQuestion = (text) => {
   _questionNumber++;
-  _updateProgressBadge(); // UX5
+  _updateProgressBadge();
   appendMessage("ai", `<strong>Interviewer:</strong><br />${escapeHtml(text)}`);
-  _restoreDraft(); // UX3: put back any saved draft text
+  _restoreDraft();
   speakQuestion(text);
 };
 
 function appendUserAnswer(text) {
   appendMessage("user", `<strong>You:</strong><br />${escapeHtml(text)}`);
-}
-
-function appendFeedback(evaluation) {
-  const pct = (evaluation.similarity * 100).toFixed(0);
-  const barColor =
-    evaluation.similarity >= 0.65
-      ? "var(--success)"
-      : evaluation.similarity >= 0.45
-        ? "var(--warning)"
-        : "var(--danger)";
-
-  appendMessage(
-    "ai",
-    `<strong>Feedback:</strong><br />
-     ${escapeHtml(evaluation.feedback)}<br />
-     <div style="margin-top:10px;font-size:0.85rem;display:flex;align-items:center;gap:10px;">
-       <div style="flex:1;height:6px;background:var(--paper-deep);border-radius:99px;overflow:hidden;">
-         <div style="width:${pct}%;height:100%;background:${barColor};border-radius:99px;transition:width 0.4s;"></div>
-       </div>
-       <span style="opacity:0.7">Relevance: ${pct}%</span>
-     </div>`,
-    "background:var(--paper-light);border:1px solid var(--border);border-left:3px solid var(--warm);",
-  );
 }
 
 function appendSystemMessage(text) {
@@ -84,7 +55,6 @@ function appendSystemMessage(text) {
   chatContainer.scrollTop = chatContainer.scrollHeight;
 }
 
-// ── UX5: Progress badge ────────────────────────────────────────────────────────
 function _updateProgressBadge() {
   let badge = document.getElementById("qp-question-badge");
   if (!badge) {
@@ -97,7 +67,6 @@ function _updateProgressBadge() {
   badge.style.display = "inline-flex";
 }
 
-// ── UX2: Auto-resize ──────────────────────────────────────────────────────────
 function _autoResize() {
   if (!answerTextarea) return;
   answerTextarea.style.height = "auto";
@@ -105,7 +74,6 @@ function _autoResize() {
     Math.min(answerTextarea.scrollHeight, 200) + "px";
 }
 
-// ── UX4: Character counter ─────────────────────────────────────────────────────
 function _updateCharCounter() {
   if (!charCounterEl || !answerTextarea) return;
   const len = answerTextarea.value.length;
@@ -114,7 +82,6 @@ function _updateCharCounter() {
   charCounterEl.classList.toggle("char-counter-limit", len > 1200);
 }
 
-// ── UX3: Draft persistence ─────────────────────────────────────────────────────
 function _saveDraft() {
   sessionStorage.setItem(DRAFT_KEY, answerTextarea?.value ?? "");
 }
@@ -130,7 +97,6 @@ function _clearDraft() {
   sessionStorage.removeItem(DRAFT_KEY);
 }
 
-// ── Input state helpers ────────────────────────────────────────────────────────
 function setSubmitEnabled(enabled) {
   const submitBtn = chatForm?.querySelector("button[type='submit']");
   if (submitBtn) submitBtn.disabled = !enabled;
@@ -138,8 +104,6 @@ function setSubmitEnabled(enabled) {
   if (micBtn) micBtn.disabled = !enabled;
 }
 
-// FIX-LABEL: was btn.textContent = text, which stripped the Lucide icon child
-// element.  Now uses innerHTML so the icon is restored when resetting to "Send".
 function setSubmitLabel(text) {
   const btn = chatForm?.querySelector("button[type='submit']");
   if (!btn) return;
@@ -147,12 +111,10 @@ function setSubmitLabel(text) {
     btn.innerHTML = '<i data-lucide="send"></i> Send';
     if (window.lucide) lucide.createIcons();
   } else {
-    // During transient states like "Evaluating…" an icon isn't needed.
     btn.textContent = text;
   }
 }
 
-// ── B03: Session Resume Logic ──────────────────────────────────────────────────
 async function tryResumeSession() {
   const storedId = localStorage.getItem(SESSION_KEY);
   if (!storedId) return false;
@@ -168,7 +130,7 @@ async function tryResumeSession() {
       return false;
     }
     sessionId = storedId;
-    _questionNumber = data.questions_answered ?? 0; // UX5: restore correct count
+    _questionNumber = data.questions_answered ?? 0;
     appendSystemMessage(
       `Resuming your session (${data.questions_answered} question(s) answered so far).`,
     );
@@ -183,7 +145,6 @@ async function tryResumeSession() {
   }
 }
 
-// ── Session start ──────────────────────────────────────────────────────────────
 async function startInterview() {
   chatContainer.innerHTML = "";
   appendSystemMessage("Starting your interview session…");
@@ -192,11 +153,20 @@ async function startInterview() {
   const resumed = await tryResumeSession();
   if (resumed) return;
 
+  // Add this to grab the file_id from the URL
+  const urlParams = new URLSearchParams(window.location.search);
+  const fileIdParam = urlParams.get("file_id");
+
+  const payload = { user_id: userId };
+  if (fileIdParam) {
+    payload.file_id = fileIdParam;
+  }
+
   try {
     const res = await fetch(`${API_BASE}/api/interview/start`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: userId }),
+      body: JSON.stringify(payload), // Send the updated payload here
     });
     const data = await res.json();
     chatContainer.innerHTML = "";
@@ -222,7 +192,6 @@ async function startInterview() {
   }
 }
 
-// ── Answer submission ──────────────────────────────────────────────────────────
 async function submitAnswer() {
   const answer = answerTextarea?.value?.trim();
   if (!answer || !sessionId) return;
@@ -231,7 +200,7 @@ async function submitAnswer() {
   setSubmitLabel("Evaluating…");
   appendUserAnswer(answer);
   answerTextarea.value = "";
-  _clearDraft(); // UX3
+  _clearDraft();
   _autoResize();
   _updateCharCounter();
 
@@ -243,7 +212,7 @@ async function submitAnswer() {
     });
     const data = await res.json();
     if (res.ok) {
-      appendFeedback(data.evaluation);
+      // FEEDBACK REMOVED — evaluation happens silently in the background.
       if (data.is_terminal) {
         appendSystemMessage(
           "You've answered all available questions — great work!",
@@ -268,28 +237,24 @@ async function submitAnswer() {
   }
 }
 
-// ── Session end ────────────────────────────────────────────────────────────────
 async function endSession() {
-  if (sessionId) {
+  const sid = sessionId;
+  if (sid) {
     try {
-      await fetch(`${API_BASE}/api/interview/${sessionId}`, {
-        method: "DELETE",
-      });
+      await fetch(`${API_BASE}/api/interview/${sid}`, { method: "DELETE" });
     } catch (_) {}
     localStorage.removeItem(SESSION_KEY);
   }
-  _clearDraft(); // UX3: clean up on intentional exit
-  window.location.href = "/profile";
+  _clearDraft();
+  window.location.href = sid ? `/session?sid=${sid}` : "/profile";
 }
 
-// ── Summary button ─────────────────────────────────────────────────────────────
 function showSummaryButton() {
   const div = document.createElement("div");
   div.style.cssText = "text-align:center;margin-top:20px;padding:10px;";
   div.innerHTML = `
-    <a href="/api/interview/${sessionId}/summary" target="_blank"
-       class="btn btn-primary" style="text-decoration:none;margin-right:10px;">
-      View Summary
+    <a href="/session?sid=${sessionId}" class="btn btn-primary" style="text-decoration:none;margin-right:10px;">
+      View Session Results
     </a>
     <a href="/profile" class="btn btn-dark" style="text-decoration:none;">
       Back to Profile
@@ -298,7 +263,6 @@ function showSummaryButton() {
   chatContainer.scrollTop = chatContainer.scrollHeight;
 }
 
-// ── B02: TTS helper ────────────────────────────────────────────────────────────
 async function speakQuestion(text) {
   try {
     const res = await fetch(`${API_BASE}/api/tts`, {
@@ -313,7 +277,6 @@ async function speakQuestion(text) {
     try {
       await audio.play();
     } catch (playErr) {
-      // Autoplay blocked by browser before first user interaction — non-fatal.
       console.warn("TTS autoplay blocked:", playErr);
     }
     audio.onended = () => URL.revokeObjectURL(url);
@@ -322,14 +285,12 @@ async function speakQuestion(text) {
   }
 }
 
-// ── Event listeners ────────────────────────────────────────────────────────────
 chatForm?.addEventListener("submit", (e) => {
   e.preventDefault();
   submitAnswer();
 });
 endSessionBtn?.addEventListener("click", endSession);
 
-// UX1: Ctrl+Enter / Cmd+Enter submits from the textarea
 answerTextarea?.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
     e.preventDefault();
@@ -337,16 +298,13 @@ answerTextarea?.addEventListener("keydown", (e) => {
   }
 });
 
-// UX2 + UX3 + UX4: textarea input handling
 answerTextarea?.addEventListener("input", () => {
   _autoResize();
   _updateCharCounter();
   _saveDraft();
 });
 
-// ── Init ───────────────────────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
-  // UX4: Inject character counter element below the textarea
   if (answerTextarea) {
     charCounterEl = document.createElement("div");
     charCounterEl.id = "qp-char-counter";
@@ -357,11 +315,8 @@ document.addEventListener("DOMContentLoaded", () => {
       answerTextarea.nextSibling,
     );
     _updateCharCounter();
-
-    // UX1: Update placeholder to hint at keyboard shortcut
     answerTextarea.placeholder =
       "Type your answer or speak\u2026 (Ctrl+Enter to submit)";
   }
-
   startInterview();
 });
