@@ -15,6 +15,12 @@
             src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"
             defer
         ></script>
+        <script>
+            const theme = localStorage.getItem("qp-theme");
+            if (theme === "light") {
+                document.documentElement.setAttribute("data-theme", "light");
+            }
+        </script>
     </head>
     <body>
         <nav class="site-nav">
@@ -25,8 +31,12 @@
                         <i data-lucide="play" class="lucide"></i> Start
                         Interview
                     </a>
-                    <button class="btn btn-outline btn-sm" id="logout-btn">
-                        <i data-lucide="log-out" class="lucide"></i> Logout
+                    <button
+                        id="menu-toggle"
+                        aria-label="Open Settings"
+                        class="btn btn-ghost btn-sm"
+                    >
+                        <i data-lucide="menu" class="lucide"></i>
                     </button>
                 </div>
             </div>
@@ -44,23 +54,15 @@
 
         <div class="page-section">
             <div class="container">
-                <!-- Upload section -->
                 <div style="margin-bottom: 3rem">
                     <h2>Upload a Document</h2>
                     <p style="margin-bottom: 1.5rem; max-width: 55ch">
                         Upload a PDF, lecture notes, a textbook chapter, a
                         research paper. QuestionPrep will extract and generate
-                        interview questions from it.
+                        interview questions from it. Please upload PDFs less
+                        than 1-2 MB for now.
                     </p>
 
-                    <!--
-                        OPT5: Drag-and-drop upload zone.
-                        The entire box is a drop target. The file input and
-                        upload button remain functional as before. app.js
-                        listens for dragenter / dragover / dragleave / drop
-                        events on #upload-drop-zone and routes dropped files
-                        through the shared uploadFile() function.
-                    -->
                     <div id="upload-drop-zone" class="upload-drop-zone">
                         <div class="upload-drop-icon">
                             <i
@@ -97,20 +99,15 @@
                     </div>
                 </div>
 
-                <!-- Files section -->
                 <div>
                     <h2>Your Files</h2>
                     <p style="margin-bottom: 1.5rem; max-width: 55ch">
                         Once a file is ingested, click
                         <strong>Generate Questions</strong> to run the
-                        enrichment pipeline. This can take a few minutes.
+                        enrichment pipeline. This can take a few minutes. Click
+                        anywhere else on the card to view details.
                     </p>
 
-                    <!--
-                        B23 FIX: Hardcoded static .file-card placeholder divs
-                        removed. The skeleton loader below is replaced by real
-                        cards when fetchUserFiles() resolves.
-                    -->
                     <div
                         class="grid"
                         id="files-grid"
@@ -121,7 +118,6 @@
                             );
                         "
                     >
-                        <!-- Skeleton shown while JS loads real data -->
                         <div
                             id="files-skeleton"
                             style="
@@ -159,6 +155,63 @@
                 <span>QuestionPrep study smarter.</span>
             </div>
         </footer>
+
+        <aside id="settings-drawer" class="drawer">
+            <div class="drawer-header">
+                <h2>Settings</h2>
+                <button
+                    id="close-drawer"
+                    class="btn btn-ghost btn-sm"
+                    aria-label="Close Settings"
+                >
+                    <i data-lucide="x" class="lucide"></i>
+                </button>
+            </div>
+            <div class="drawer-content">
+                <button id="btn-change-email" class="drawer-btn">
+                    <i data-lucide="mail" class="lucide"></i> Change Email
+                </button>
+                <hr />
+                <button id="btn-delete-files" class="drawer-btn danger-text">
+                    <i data-lucide="trash-2" class="lucide"></i> Delete All
+                    Files
+                </button>
+                <button id="btn-delete-account" class="drawer-btn danger-bg">
+                    <i data-lucide="user-x" class="lucide"></i> Delete Account
+                </button>
+                <hr />
+                <button id="btn-logout" class="drawer-btn">
+                    <i data-lucide="log-out" class="lucide"></i> Logout
+                </button>
+            </div>
+        </aside>
+
+        <dialog id="file-summary-modal" class="audit-modal">
+            <div class="modal-header">
+                <h2 id="modal-file-title" style="margin: 0; font-size: 1.4rem">
+                    File Details
+                </h2>
+                <button
+                    id="close-modal"
+                    class="btn btn-ghost btn-sm"
+                    aria-label="Close Modal"
+                >
+                    <i data-lucide="x" class="lucide"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="audit-section">
+                    <h3>
+                        Generated Questions (<span id="modal-q-count">0</span>)
+                    </h3>
+                    <ul id="modal-questions-list" class="audit-list"></ul>
+                </div>
+                <div class="audit-section" style="margin-top: 2rem">
+                    <h3>Rejected Chunks / Failed Questions</h3>
+                    <ul id="modal-rejected-list" class="audit-list"></ul>
+                </div>
+            </div>
+        </dialog>
 
         <style>
             @keyframes pulse {
@@ -198,15 +251,6 @@
 
                 lucide.createIcons();
             });
-
-            document
-                .getElementById("logout-btn")
-                ?.addEventListener("click", () => {
-                    localStorage.removeItem("qp_user_id");
-                    localStorage.removeItem("qp_token");
-                    localStorage.removeItem("qp_session_id");
-                    window.location.href = "/login";
-                });
         </script>
     </body>
 </html>

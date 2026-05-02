@@ -177,8 +177,140 @@
         </div>
 
         <script type="module">
-            import AudioMotionAnalyzer from "https://unpkg.com/audiomotion-analyzer?module";
+            class MinimalAudioVisualizer {
+                constructor(container, options = {}) {
+                    this.container = container;
+                    this._audioCtx = new (
+                        window.AudioContext || window.webkitAudioContext
+                    )();
 
+                    this.canvas = document.createElement("canvas");
+                    this.canvas.style.width = "100%";
+                    this.canvas.style.height = "100%";
+                    this.canvas.style.display = "none";
+                    this.canvas.style.position = "absolute";
+                    this.canvas.style.top = "0";
+                    this.canvas.style.left = "0";
+                    container.appendChild(this.canvas);
+
+                    this.ctx = this.canvas.getContext("2d");
+                    this.resize();
+
+                    this._ro = new ResizeObserver(() => this.resize());
+                    this._ro.observe(container);
+
+                    this.analyser = null;
+                    this.source = null;
+                    this.rafId = null;
+
+                    this.minDecibels = options.minDecibels ?? -75;
+                    this.smoothing = options.smoothing ?? 0.8;
+                }
+
+                get audioCtx() {
+                    return this._audioCtx;
+                }
+
+                resize() {
+                    const rect = this.container.getBoundingClientRect();
+                    const dpr = window.devicePixelRatio || 1;
+                    this.canvas.width = rect.width * dpr;
+                    this.canvas.height = rect.height * dpr;
+                    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                    this.width = rect.width;
+                    this.height = rect.height;
+                }
+
+                // API-compatibility stubs for the original library
+                registerGradient(name, opts) {}
+                setOptions(opts) {}
+                disconnectOutput() {}
+
+                connectInput(sourceNode) {
+                    this.source = sourceNode;
+                    this.analyser = this._audioCtx.createAnalyser();
+                    this.analyser.fftSize = 256;
+                    this.analyser.smoothingTimeConstant = this.smoothing;
+                    this.analyser.minDecibels = this.minDecibels;
+                    this.analyser.maxDecibels = -10;
+                    sourceNode.connect(this.analyser);
+
+                    this.canvas.style.display = "block";
+                    this.draw();
+                }
+
+                disconnectInput() {
+                    this.canvas.style.display = "none";
+                    if (this.rafId) {
+                        cancelAnimationFrame(this.rafId);
+                        this.rafId = null;
+                    }
+                    if (this.source && this.analyser) {
+                        try {
+                            this.source.disconnect(this.analyser);
+                        } catch (e) {}
+                    }
+                    if (this.analyser) {
+                        try {
+                            this.analyser.disconnect();
+                        } catch (e) {}
+                    }
+                    this.analyser = null;
+                    this.source = null;
+                }
+
+                draw() {
+                    if (!this.analyser) return;
+
+                    const bufferLength = this.analyser.frequencyBinCount;
+                    const dataArray = new Uint8Array(bufferLength);
+                    this.analyser.getByteFrequencyData(dataArray);
+
+                    const ctx = this.ctx;
+                    const w = this.width;
+                    const h = this.height;
+
+                    ctx.clearRect(0, 0, w, h);
+
+                    const barCount = 32;
+                    const step = Math.floor(bufferLength / barCount);
+                    const gapRatio = 0.35;
+                    const barWidth = (w / barCount) * (1 - gapRatio);
+                    const gap = (w / barCount) * gapRatio;
+
+                    for (let i = 0; i < barCount; i++) {
+                        let sum = 0;
+                        const start = i * step;
+                        const end = Math.min(start + step, bufferLength);
+                        for (let j = start; j < end; j++) sum += dataArray[j];
+                        const avg = sum / (end - start);
+                        const pct = avg / 255;
+                        const barHeight = Math.max(2, pct * h * 0.9);
+
+                        const x = i * (barWidth + gap) + gap / 2;
+                        const y = h - barHeight;
+
+                        // Warm gradient matching the app theme (#b1682e → #c97f3e → #dfa56f)
+                        let r, g, b;
+                        if (pct < 0.5) {
+                            const t = pct * 2;
+                            r = 177 + (201 - 177) * t;
+                            g = 104 + (127 - 104) * t;
+                            b = 46 + (62 - 46) * t;
+                        } else {
+                            const t = (pct - 0.5) * 2;
+                            r = 201 + (223 - 201) * t;
+                            g = 127 + (165 - 127) * t;
+                            b = 62 + (111 - 62) * t;
+                        }
+
+                        ctx.fillStyle = `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`;
+                        ctx.fillRect(x, y, barWidth, barHeight);
+                    }
+
+                    this.rafId = requestAnimationFrame(() => this.draw());
+                }
+            }
             console.log(
                 "Module script executing. window.TcnStressDetector =",
                 typeof window.TcnStressDetector,
@@ -276,32 +408,11 @@
 
             function initVisualizer() {
                 if (audioMotion) return;
-                audioMotion = new AudioMotionAnalyzer(visualizerContainer, {
-                    source: null,
+                audioMotion = new MinimalAudioVisualizer(visualizerContainer, {
                     height: 200,
-                    mode: 3,
-                    barSpace: 0.4,
-                    ledBars: false,
-                    lumiBars: true,
-                    radial: false,
-                    showScaleX: false,
-                    showScaleY: false,
-                    bgAlpha: 0,
-                    overlay: true,
-                    gradient: "classic",
                     minDecibels: -75,
                     smoothing: 0.8,
                 });
-                audioMotion.registerGradient("warm", {
-                    bgColor: "transparent",
-                    colorStops: [
-                        { pos: 0, color: "#b1682e" },
-                        { pos: 0.5, color: "#c97f3e" },
-                        { pos: 1, color: "#dfa56f" },
-                    ],
-                });
-                audioMotion.setOptions({ gradient: "warm" });
-                audioMotion.disconnectOutput();
             }
 
             function triggerHaptics(level) {

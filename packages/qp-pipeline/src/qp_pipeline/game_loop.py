@@ -91,13 +91,7 @@ MIN_LEXICAL_WORDS = 4  # answers shorter than this cannot pass via lexical alone
 LENGTH_RATIO_MIN = 0.85  # below this → likely cutoff / incomplete
 LENGTH_RATIO_MAX = 1.50  # above this → likely rambling / hallucination
 # ── Logging ──────────────────────────────────────────────────────────────────
-# Do NOT call basicConfig here. When game_loop is imported by main.py, the root
-# logger is already configured (INFO). Calling basicConfig again would either be
-# a no-op (handlers already set) or override the root config unexpectedly.
-#
-# In standalone terminal mode we attach our own handler to the GameLoop logger
-# so its messages appear independently of whatever the root logger is doing.
-# The handler is only added when __name__ == "__main__" (see main() below).
+
 
 logger = logging.getLogger("GameLoop")
 
@@ -313,10 +307,7 @@ class LogicEngine:
                     if BGE_AVAILABLE:
                         try:
                             logger.info(f"Loading bi-encoder: {BGE_MODEL}")
-                            # Try local cache first (no network). If the cache is
-                            # partial (e.g. from a previous interrupted download),
-                            # the local load will fail and we fall through to a
-                            # fresh download.
+
                             try:
                                 cls._bi_encoder = SentenceTransformer(
                                     BGE_MODEL, local_files_only=True
@@ -576,10 +567,6 @@ class LogicEngine:
            Scale by entailment confidence.
            adjusted = bi_score * (0.50 + 0.50 * p_entail)
            e.g. bi=0.67, p_entail=0.25 → 0.67 * 0.625 = 0.42
-
-           Rationale: this is the main fix for the "on-topic but wrong" problem.
-           High bi-encoder + low entailment = same subject, different claim.
-           The 0.50 floor preserves partial credit for clearly related answers.
         """
         p_e = nli.p_entailment
         p_c = nli.p_contradiction
@@ -632,10 +619,6 @@ class LogicEngine:
             )
 
             if max_nli_prob >= 0.60:
-                # Neutral override: if the bi-encoder strongly believes it's correct
-                # but CE is merely "neutral", trust the bi-encoder.  A confident NLI
-                # neutral on a high-similarity answer is almost always a paraphrase
-                # the cross-encoder failed to resolve — don't let it tank the score.
                 if nli_result.p_neutral == max_nli_prob and bi_score >= 0.85:
                     similarity = bi_score
                     grader_used = "bi-encoder (CE neutral override)"
@@ -915,8 +898,6 @@ class TerminalInterview:
         """
         if not HF_HUB_AVAILABLE:
             return False
-        # try_to_load_from_cache returns a path string if cached, None if not,
-        # or the sentinel _CACHED_NO_EXIST if the repo exists but file doesn't.
         result = try_to_load_from_cache(model_name, filename="config.json")
         return (
             result is not None
@@ -1267,8 +1248,6 @@ class TerminalInterview:
         with self._load_model(CE_NLI_MODEL, "Cross-encoder NLI"):
             LogicEngine._get_ce_model()
 
-        # If CE was skipped (interrupted or failed), inform the user clearly
-        # before starting the interview so they know scoring is bi-encoder only.
         if LogicEngine._ce_skipped:
             if RICH_AVAILABLE:
                 console.print(
@@ -1389,12 +1368,7 @@ def _pick_user(db_path: Path) -> Optional[str]:
 
 
 def main():
-    # ── Terminal logging setup ────────────────────────────────────────────────
-    # Only configure logging here, when running as a standalone script.
-    # When imported by FastAPI, main.py owns logging setup — we don't touch it.
-    #
-    # We attach a handler directly to the GameLoop logger (not the root logger)
-    # so we don't interfere with any other package's logging config.
+    # ── Terminal logging setup ───────────────────────────────────────────────
     _handler = logging.StreamHandler(sys.stderr)
     _handler.setLevel(logging.DEBUG)
     _handler.setFormatter(logging.Formatter("[%(levelname)s] %(name)s: %(message)s"))

@@ -28,7 +28,7 @@ def _(engine, files, mo):
         f"""
         Select * FROm files
         """,
-        engine=engine
+        engine=engine,
     )
     return
 
@@ -42,7 +42,7 @@ def _(chunks, engine, mo):
         FROM
             chunks
         """,
-        engine=engine
+        engine=engine,
     )
     return
 
@@ -56,7 +56,7 @@ def _(chunk_enrichments, engine, mo):
         FROM
             chunk_enrichments
         """,
-        engine=engine
+        engine=engine,
     )
     return
 
@@ -70,7 +70,7 @@ def _(chunk_questions, engine, mo):
         WHERE question_text LIKE '%space complexity of EXPANDER%O(1) per node%'
            OR question_text LIKE '%data collection relate to the challenges in machine learning applications%';
         """,
-        engine=engine
+        engine=engine,
     )
     return
 
@@ -100,7 +100,7 @@ def _(chunk_enrichments, chunk_questions, chunks, engine, mo):
         WHERE c.should_use = 1 
         ORDER by e.processed_at DESC
         """,
-        engine=engine
+        engine=engine,
     )
     return
 
@@ -111,22 +111,21 @@ def _(chunk_rejections, engine, mo):
         f"""
         SELECT * FROM chunk_rejections
         """,
-        engine=engine
+        engine=engine,
     )
     return
 
 
 @app.cell(hide_code=True)
-def _(chunk_enrichments, chunk_questions, chunks, engine, mo):
+def _():
+    return
+
+
+@app.cell
+def _(engine, mo, session_results):
     _df = mo.sql(
         f"""
-                    SELECT q.question_id, q.chunk_id, c.file_id, q.question_text, q.answer_text,
-                           q.source_quote, q.difficulty, q.question_type, e.tags
-                    FROM chunk_questions q
-                    JOIN chunks c ON q.chunk_id = c.chunk_id
-                    LEFT JOIN chunk_enrichments e ON q.chunk_id = e.chunk_id
-                    WHERE c.file_id = 'e473bee9-5647-40ed-af26-9386c4ed4fb1'
-                    ORDER BY c.chunk_index
+        SELECT * FROM session_results
         """,
         engine=engine
     )
@@ -134,7 +133,24 @@ def _(chunk_enrichments, chunk_questions, chunks, engine, mo):
 
 
 @app.cell
-def _():
+def _(engine, mo, users):
+    _df = mo.sql(
+        f"""
+        select * from users
+        """,
+        engine=engine
+    )
+    return
+
+
+@app.cell(hide_code=True)
+def _(engine, mo, user_files):
+    _df = mo.sql(
+        f"""
+        Select * from user_files
+        """,
+        engine=engine
+    )
     return
 
 

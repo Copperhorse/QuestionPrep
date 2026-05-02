@@ -240,9 +240,6 @@ async function submitAnswer() {
 async function endSession() {
   const sid = sessionId;
   if (sid) {
-    try {
-      await fetch(`${API_BASE}/api/interview/${sid}`, { method: "DELETE" });
-    } catch (_) {}
     localStorage.removeItem(SESSION_KEY);
   }
   _clearDraft();

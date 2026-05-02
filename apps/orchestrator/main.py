@@ -5,7 +5,6 @@ uv run uvicorn apps.orchestrator.main:app --reload
 ds"""
 
 import asyncio
-import json
 import logging
 import mimetypes
 import os
@@ -14,7 +13,6 @@ import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Set
 
@@ -47,11 +45,8 @@ from qp_pipeline.Enricher import EnrichmentManager
 from qp_pipeline.game_loop import InterviewSession
 from qp_pipeline.ingester import ingest
 from qp_pipeline.MarkdownChunker import ChunkConfig, MarkdownChunker
-
-# OPT: Removed `analyze_disfluencies` — it was imported but never called directly
-# in this file.  All disfluency analysis goes through SpeechToText.transcribe_and_analyze().
 from qp_voice.speech_to_text import SpeechToText
-from qp_voice.text_to_speech import TextToSpeech  # B02: was never imported
+from qp_voice.text_to_speech import TextToSpeech
 
 # B25: Rate limiting
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -71,10 +66,12 @@ DB_PATH = DATA_DIR / "rag_staging.db"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # ---------------- LLAMA SERVER CONFIG ----------------
-# B15: Read paths from environment variables so the app is not locked to one machine.
-# Set LLAMA_BIN and LLAMA_MODEL in your shell or a .env file.
-_DEFAULT_LLAMA_BIN = "/media/copper/USB_STICK/Git/llama.cpp/build/bin/llama-server"
-_DEFAULT_LLAMA_MODEL = "/media/copper/USB_STICK/Models/LFM2.5-1.2B-Instruct-Q8_0.gguf"
+_DEFAULT_LLAMA_BIN = (
+    "/home/copper/Desktop/Project/LLAMACPP/llama.cpp/build/bin/llama-server"
+)
+_DEFAULT_LLAMA_MODEL = (
+    "/home/copper/Desktop/Project/Model/LFM2.5-1.2B-Instruct-Q8_0.gguf"
+)
 
 LLAMA_BIN = Path(os.environ.get("LLAMA_BIN", _DEFAULT_LLAMA_BIN))
 LLAMA_MODEL = Path(os.environ.get("LLAMA_MODEL", _DEFAULT_LLAMA_MODEL))
@@ -87,23 +84,20 @@ HEALTH_RETRIES = 60
 HEALTH_INTERVAL = 3  # seconds
 
 # ---------------- SESSION CONFIG ----------------
-# B22: Sessions inactive longer than this are automatically pruned.
 SESSION_TTL_SECONDS = 1800  # 30 minutes
 
 # ---------------- GLOBAL STATE ----------------
 db = DBManager(db_path=str(DB_PATH))
 active_sessions: Dict[str, InterviewSession] = {}
-_session_last_active: Dict[str, float] = {}  # B22: tracks last activity per session
+_session_last_active: Dict[str, float] = {}
 
 _stt: Optional[SpeechToText] = None
-_tts: Optional[TextToSpeech] = None  # B02: TTS singleton
+_tts: Optional[TextToSpeech] = None
 _llm_process: Optional[subprocess.Popen] = None
 
 _tts_lock = threading.Lock()
 _stt_lock = threading.Lock()
-# ── SSE BROADCASTER ──────────────────────────────────────────────────────────
-# One asyncio.Queue per connected browser tab.  broadcast() is the async
-# version; emit() is the thread-safe shim used by background tasks.
+
 _sse_clients: Set[asyncio.Queue] = set()
 _active_enrichments: int = 0
 _enrichment_lock = threading.Lock()
@@ -111,7 +105,6 @@ _main_loop: Optional[asyncio.AbstractEventLoop] = None
 
 
 async def broadcast(message: str) -> None:
-    """Push *message* to every connected SSE client. Must be called from async context."""
     dead = set()
     for q in list(_sse_clients):
         try:
@@ -122,11 +115,6 @@ async def broadcast(message: str) -> None:
 
 
 def emit(message: str) -> None:
-    """
-    Thread-safe broadcast — safe to call from synchronous background threads
-    (ingestion, enrichment).  Schedules broadcast() onto the main event loop.
-    Falls back to logger.info() if the loop isn't running yet.
-    """
     if _main_loop and _main_loop.is_running():
         asyncio.run_coroutine_threadsafe(broadcast(message), _main_loop)
     else:
@@ -146,7 +134,6 @@ def _dec_enrichments() -> None:
 
 
 def get_stt() -> SpeechToText:
-    """Synchronous loader — always call via run_in_executor (B18)."""
     global _stt
     if _stt is None:
         with _stt_lock:
@@ -159,9 +146,9 @@ def get_stt() -> SpeechToText:
 
 def get_tts() -> TextToSpeech:
     global _tts
-    if _tts is None:  # fast path — no lock
-        with _tts_lock:  # slow path — one thread at a time
-            if _tts is None:  # re-check after acquiring lock
+    if _tts is None:
+        with _tts_lock:
+            if _tts is None:
                 emit("[INFO] tts: ▶ Loading pocket-tts model…")
                 _tts = TextToSpeech()
                 emit("[INFO] tts: ✓ TextToSpeech ready")
@@ -174,10 +161,6 @@ def get_tts() -> TextToSpeech:
 
 
 async def _session_pruner():
-    """
-    B22: Periodically evict sessions that have been inactive beyond SESSION_TTL_SECONDS.
-    Runs as a background asyncio task for the lifetime of the application.
-    """
     while True:
         await asyncio.sleep(300)  # check every 5 minutes
         now = time.time()
@@ -237,8 +220,6 @@ def _ensure_llama_running() -> bool:
 
     _kill_stale_server()
 
-    # B08: Open the log file handle, pass it to Popen, then close it immediately.
-    # The child process inherits the fd; the parent no longer needs to hold it open.
     log_fh = open(LLAMA_LOG, "w")
     logger.info("Starting llama-server…")
     emit(f"[INFO] llm: ▶ Starting llama-server ({LLAMA_MODEL.name})…")
@@ -255,7 +236,7 @@ def _ensure_llama_running() -> bool:
         stdout=log_fh,
         stderr=log_fh,
     )
-    log_fh.close()  # B08: close our copy; the child process has its own inherited fd
+    log_fh.close()
 
     logger.info(
         f"llama-server started (PID {_llm_process.pid}). Waiting for model to load…"
@@ -311,20 +292,18 @@ def _stop_llama_server():
 
 
 # ==========================================
-# B27: LIFESPAN (replaces deprecated @app.on_event)
+# LIFESPAN
 # ==========================================
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _main_loop
-    # Startup — store the running loop so emit() works from background threads
     _main_loop = asyncio.get_running_loop()
-    asyncio.create_task(_session_pruner())  # B22: launch session pruner
+    asyncio.create_task(_session_pruner())
     await broadcast("[INFO] orchestrator: ✓ QuestionPrep API started")
     logger.info("QuestionPrep API started.")
     yield
-    # Shutdown
     await broadcast("[INFO] orchestrator: ■ QuestionPrep API shutting down")
     _stop_llama_server()
     logger.info("QuestionPrep API shut down.")
@@ -334,16 +313,11 @@ async def lifespan(app: FastAPI):
 # APP & TEMPLATES
 # ==========================================
 
-app = FastAPI(title="QuestionPrep API", lifespan=lifespan)  # B27
+app = FastAPI(title="QuestionPrep API", lifespan=lifespan)
 
-# B25: Rate limiter — keyed by client IP.
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-
-# B10: Wildcard origin + allow_credentials=True is rejected by all modern browsers.
-# Specify only the origins you actually serve from.
-#
 
 ALLOWED_ORIGINS = os.environ.get(
     "ALLOWED_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000"
@@ -351,7 +325,7 @@ ALLOWED_ORIGINS = os.environ.get(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,  # B10: was ["*"]
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -388,11 +362,14 @@ class GenerateRequest(BaseModel):
 
 class StartInterviewRequest(BaseModel):
     user_id: str
-    file_id: Optional[str] = None  # Add this line
 
 
 class TTSRequest(BaseModel):
     text: str
+
+
+class EmailUpdateRequest(BaseModel):
+    new_email: str
 
 
 # ==========================================
@@ -401,8 +378,7 @@ class TTSRequest(BaseModel):
 
 
 def run_ingestion_task(temp_path: Path, user_id: str):
-    """CPU/IO-heavy ingestion — chunking, SimHash dedup, DB insert."""
-    fname = temp_path.name.split("_", 1)[-1]  # strip uuid prefix for display
+    fname = temp_path.name.split("_", 1)[-1]
     emit(f"[INFO] ingest: ▶ Ingesting {fname} for user {user_id[:8]}…")
     try:
         converter = PDFDocumentConverter()
@@ -438,20 +414,11 @@ def run_ingestion_task(temp_path: Path, user_id: str):
         logger.error(f"Ingestion failed: {e}")
         emit(f"[ERROR] ingest: ✗ Ingestion failed for {fname}: {e}")
     finally:
-        # B09: Always clean up the temp file, even if ingestion fails.
         if temp_path.exists():
             temp_path.unlink(missing_ok=True)
 
 
 def run_enrichment_task(file_id: str):
-    """
-    LLM enrichment + vector indexing for one file.
-
-    B11: _stop_llama_server() removed from finally block.
-         Killing the server after every task meant a second queued file
-         always found no server running. The server now stays alive between
-         tasks and is only stopped in the lifespan shutdown handler.
-    """
     _inc_enrichments()
     emit(f"[INFO] enricher: ▶ Starting enrichment for file {file_id[:8]}…")
     try:
@@ -481,7 +448,6 @@ def run_enrichment_task(file_id: str):
         emit(f"[ERROR] enricher: ✗ Enrichment failed for {file_id[:8]}: {e}")
     finally:
         _dec_enrichments()
-    # B11: No _stop_llama_server() here — server stays running for next task
 
 
 # ==========================================
@@ -500,7 +466,7 @@ async def read_root(request: Request):
 @app.get("/sw.js")
 async def service_worker():
     return FileResponse(
-        BASE_DIR / "sw.js",  # ← was "static" / "js" / "sw.js"
+        BASE_DIR / "sw.js",
         media_type="application/javascript",
     )
 
@@ -530,7 +496,7 @@ async def signup(user: SignupRequest):
     user_id = db.create_user(
         username=user.username,
         email=user.email,
-        password=user.password,  # B01: password now passed to DBManager for hashing
+        password=user.password,
     )
     if not user_id:
         raise HTTPException(status_code=400, detail="Username or email already exists")
@@ -542,10 +508,14 @@ async def login(user: LoginRequest):
     db_user = db.get_user_by_username(user.username)
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
-    # B01: Verify hashed password
     if not db.verify_password(user.username, user.password):
         raise HTTPException(status_code=401, detail="Invalid password")
     return {"token": "mock-jwt-token", "user": db_user}
+
+
+@app.get("/session", response_class=HTMLResponse)
+async def get_session_page(request: Request):
+    return templates.TemplateResponse("session.html", {"request": request})
 
 
 @app.get("/api/auth/profile")
@@ -556,15 +526,35 @@ async def get_profile(user_id: str):
     return {"profile": user}
 
 
+@app.delete("/api/users/{user_id}")
+async def delete_user_account(user_id: str):
+    try:
+        db.delete_user(user_id)
+        return {"status": "success", "message": "Account deleted successfully."}
+    except Exception as e:
+        logger.error(f"Failed to delete user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete account.")
+
+
+@app.put("/api/users/{user_id}/email")
+async def update_user_email(user_id: str, payload: EmailUpdateRequest):
+    try:
+        db.update_user_email(user_id, payload.new_email)
+        return {"status": "success", "message": "Email updated successfully."}
+    except Exception as e:
+        logger.error(f"Failed to update email for {user_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update email.")
+
+
 # ==========================================
 # PIPELINE API ROUTES
 # ==========================================
 
 
 @app.post("/api/files/ingest")
-@limiter.limit("5/minute")  # B25: max 5 uploads per minute per IP
+@limiter.limit("5/minute")
 async def ingest_file(
-    request: Request,  # B25: slowapi requires Request in the signature
+    request: Request,
     user_id: str,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
@@ -585,14 +575,12 @@ async def ingest_file(
 
 
 @app.post("/api/questions/generate")
-@limiter.limit("10/minute")  # B25: max 10 generation requests per minute per IP
+@limiter.limit("10/minute")
 async def generate_questions(
-    request: Request,  # B25: slowapi requires Request in the signature
+    request: Request,
     req: GenerateRequest,
     background_tasks: BackgroundTasks,
 ):
-    # B25: Skip enrichment if this file already has questions — prevents duplicate
-    #      concurrent enrichment of the same file draining CPU and llama-server.
     existing = db.get_questions_for_file(req.file_id)
     if existing:
         return {
@@ -611,20 +599,12 @@ async def list_user_files(user_id: str):
     return {"files": db.get_files_for_user(user_id)}
 
 
-@app.get("/session", response_class=HTMLResponse)
-async def get_session_page(request: Request):
-    return templates.TemplateResponse("session.html", {"request": request})
-
-
 @app.delete("/api/files/{file_id}")
 async def delete_file(file_id: str, user_id: str):
-    """Delete a file and its Chroma embeddings. B12 handled here."""
-    # Verify the file belongs to this user
     user_files = db.get_files_for_user(user_id)
     if not any(f["file_id"] == file_id for f in user_files):
         raise HTTPException(status_code=403, detail="File not found or access denied")
 
-    # B12: Delete Chroma embeddings before removing SQL records
     try:
         indexer = VectorIndexer()
         indexer.delete_embeddings_for_file(file_id)
@@ -635,6 +615,62 @@ async def delete_file(file_id: str, user_id: str):
     if not deleted:
         raise HTTPException(status_code=404, detail="File not found")
     return {"message": "File and embeddings deleted successfully"}
+
+
+@app.delete("/api/files/all/{user_id}")
+async def delete_all_user_files(user_id: str):
+    files = db.get_files_for_user(user_id)
+    indexer = VectorIndexer()
+    for f in files:
+        fid = f.get("file_id") or f.get("id")
+        if fid:
+            try:
+                indexer.delete_embeddings_for_file(fid)
+            except Exception:
+                pass
+            db.delete_file(fid)
+    return {"status": "success", "message": "All files deleted."}
+
+
+@app.get("/api/files/{file_id}/audit")
+async def get_file_audit(file_id: str):
+    try:
+        metadata_list = db.get_files_for_user(
+            None
+        )  # Not ideal, but safe fallback if no direct get_file method exists
+        metadata = next(
+            (f for f in metadata_list if f.get("file_id") == file_id),
+            {"file_id": file_id},
+        )
+    except Exception:
+        metadata = {"file_id": file_id}
+
+    try:
+        questions = db.get_questions_for_file(file_id) or []
+    except Exception:
+        questions = []
+
+    safe_questions = [
+        {
+            "question_id": q.get("question_id"),
+            "question_text": q.get("question_text"),
+            "difficulty": q.get("difficulty"),
+            "question_type": q.get("question_type"),
+        }
+        for q in questions
+    ]
+
+    try:
+        rejected = db.get_rejections_for_file(file_id) or []
+    except AttributeError:
+        rejected = []
+
+    return {
+        "metadata": metadata,
+        "total_questions": len(safe_questions),
+        "questions": safe_questions,
+        "rejected": rejected,
+    }
 
 
 # ==========================================
@@ -649,10 +685,7 @@ async def start_interview(req: StartInterviewRequest):
 
     session_id = str(uuid.uuid4())
     session = InterviewSession(
-        session_id=session_id,
-        user_id=req.user_id,
-        db_path=str(DB_PATH),
-        file_id=req.file_id,  # Pass it into the session
+        session_id=session_id, user_id=req.user_id, db_path=str(DB_PATH)
     )
     first_question = session.start_interview()
 
@@ -662,7 +695,7 @@ async def start_interview(req: StartInterviewRequest):
         )
 
     active_sessions[session_id] = session
-    _session_last_active[session_id] = time.time()  # B22: track creation time
+    _session_last_active[session_id] = time.time()
     await broadcast(
         f"[INFO] sessions: ✓ New session {session_id[:8]} started for user {req.user_id[:8]}"
     )
@@ -674,11 +707,10 @@ async def evaluate_answer(req: EvaluateRequest):
     session = active_sessions.get(req.session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    _session_last_active[req.session_id] = time.time()  # B22: refresh TTL
+    _session_last_active[req.session_id] = time.time()
     return session.evaluate_turn(req.user_answer)
 
 
-# B03: New status endpoint so the client can verify a session still exists after a reload.
 @app.get("/api/interview/{session_id}/status")
 async def get_session_status(session_id: str):
     session = active_sessions.get(session_id)
@@ -696,91 +728,32 @@ async def get_session_status(session_id: str):
 @app.get("/api/interview/{session_id}/summary")
 async def get_summary(session_id: str):
     session = active_sessions.get(session_id)
-    if session:
-        history = session.ctx.history
-        avg_score = (
-            sum(r.similarity for r in history) / len(history) if history else 0.0
-        )
-        detailed = []
-        for r in history:
-            q = session.logic.questions.get(r.question_id)
-            detailed.append(
-                {
-                    "question_id": r.question_id,
-                    "question_text": q.text if q else None,
-                    "reference_answer": q.answer if q else None,
-                    "user_answer": r.user_text,
-                    "similarity": r.similarity,
-                    "confidence": r.confidence,
-                    "feedback": r.feedback,
-                    "grader": r.grader,
-                }
-            )
-        return {
-            "questions_attempted": len(history),
-            "average_similarity": round(avg_score, 3),
-            "final_difficulty": session.ctx.difficulty_label,
-            "detailed_history": detailed,
-        }
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
 
-    # Fallback to archived results in DB
-    result = db.get_session_result(session_id)
-    if result:
-        return {
-            "questions_attempted": result["questions_attempted"],
-            "average_similarity": result["average_score"],
-            "final_difficulty": result["final_difficulty"],
-            "detailed_history": result["history"],
-        }
-
-    raise HTTPException(status_code=404, detail="Session not found")
+    history = session.ctx.history
+    avg_score = sum(r.similarity for r in history) / len(history) if history else 0.0
+    return {
+        "questions_attempted": len(history),
+        "average_similarity": round(avg_score, 3),
+        "final_difficulty": session.ctx.difficulty_label,
+        "detailed_history": [
+            {
+                "question_id": r.question_id,
+                "similarity": r.similarity,
+                "confidence": r.confidence,
+                "feedback": r.feedback,
+            }
+            for r in history
+        ],
+    }
 
 
 @app.delete("/api/interview/{session_id}")
 async def end_session(session_id: str):
     global _stt
-    summary = None
-    session = active_sessions.get(session_id)
-
-    if session:
-        # Archive session results before deletion
-        history = session.ctx.history
-        avg_score = (
-            sum(r.similarity for r in history) / len(history) if history else 0.0
-        )
-        detailed = []
-        for r in history:
-            q = session.logic.questions.get(r.question_id)
-            detailed.append(
-                {
-                    "question_id": r.question_id,
-                    "question_text": q.text if q else None,
-                    "reference_answer": q.answer if q else None,
-                    "user_answer": r.user_text,
-                    "similarity": r.similarity,
-                    "confidence": r.confidence,
-                    "feedback": r.feedback,
-                    "grader": r.grader,
-                }
-            )
-        summary = {
-            "questions_attempted": len(history),
-            "average_similarity": round(avg_score, 3),
-            "final_difficulty": session.ctx.difficulty_label,
-            "detailed_history": detailed,
-        }
-        db.save_session_result(
-            session_id=session_id,
-            user_id=session.user_id,
-            start_time="",
-            end_time=datetime.now().isoformat(),
-            questions_attempted=len(history),
-            average_score=avg_score,
-            final_difficulty=session.ctx.difficulty_label,
-            history_json=json.dumps(detailed),
-        )
+    if session_id in active_sessions:
         del active_sessions[session_id]
-
     _session_last_active.pop(session_id, None)
 
     if not active_sessions and _stt is not None:
@@ -795,7 +768,7 @@ async def end_session(session_id: str):
     await broadcast(
         f"[INFO] sessions: ■ Session {session_id[:8]} ended ({len(active_sessions)} remaining)"
     )
-    return {"message": "Session ended", "summary": summary}
+    return {"message": "Session ended"}
 
 
 # ==========================================
@@ -807,12 +780,9 @@ async def end_session(session_id: str):
 async def analyze_speech(audio: UploadFile = File(...)):
     try:
         audio_bytes = await audio.read()
-
         loop = asyncio.get_running_loop()
         stt = await loop.run_in_executor(None, get_stt)
 
-        # Use transcribe_and_analyze() which combines transcription + disfluency
-        # in one call, matching what SpeechToText already encapsulates.
         result = await loop.run_in_executor(
             None, stt.transcribe_and_analyze, audio_bytes
         )
@@ -825,7 +795,6 @@ async def analyze_speech(audio: UploadFile = File(...)):
         return result
 
     except FileNotFoundError as e:
-        # ffmpeg not installed or not on PATH — most common STT failure cause
         msg = "ffmpeg not found. Install it: sudo apt install ffmpeg (Linux) or brew install ffmpeg (Mac)."
         logger.error(msg)
         raise HTTPException(status_code=500, detail=msg)
@@ -837,32 +806,18 @@ async def analyze_speech(audio: UploadFile = File(...)):
         logger.exception(f"STT runtime error: {e}")
         raise HTTPException(status_code=500, detail=msg)
     except Exception as e:
-        # Log the full traceback so the real cause is visible in the server log
-        # (model not downloaded, soundfile missing, etc.)
         logger.exception(f"Speech analysis failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# B02: TTS endpoint — was fully implemented in qp-voice but never wired up.
 @app.post("/api/tts")
 async def text_to_speech(req: TTSRequest):
-    """
-    B02: Convert text to speech and return a WAV audio stream.
-    Called by interview.js after each question is displayed.
-
-    Fix: generate_wav_bytes() returns io.BytesIO.
-    StreamingResponse cannot iterate a BytesIO directly — it needs an async
-    generator or plain bytes. Use Response with .read() instead.
-    """
     if not req.text or not req.text.strip():
         raise HTTPException(status_code=400, detail="Text cannot be empty")
     try:
         loop = asyncio.get_running_loop()
         tts = await loop.run_in_executor(None, get_tts)
         wav_bytes = await loop.run_in_executor(None, tts.generate_wav_bytes, req.text)
-        # FIX: was StreamingResponse(wav_bytes, ...) which silently sends nothing
-        # because StreamingResponse cannot consume a BytesIO object.
-        # Response() accepts raw bytes directly via .read().
 
         audio_data = wav_bytes.read()
         await broadcast(
@@ -870,7 +825,6 @@ async def text_to_speech(req: TTSRequest):
         )
         return PlainResponse(content=audio_data, media_type="audio/wav")
     except Exception as e:
-        # Use logger.exception so the full traceback appears in the server log.
         logger.exception(f"TTS failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -882,16 +836,6 @@ async def text_to_speech(req: TTSRequest):
 
 @app.get("/api/events")
 async def sse_events(request: Request):
-    """
-    Server-Sent Events stream consumed by status-panel.js.
-
-    Each message is a plain text string formatted as:
-        [LEVEL] source: message text
-    e.g.  [INFO] enricher: ✓ Enrichment complete for a1b2c3d4
-
-    The panel also receives an SSE comment (": heartbeat") every 15 s to
-    prevent proxies from closing the idle connection.
-    """
     queue: asyncio.Queue = asyncio.Queue(maxsize=200)
     _sse_clients.add(queue)
 
@@ -902,10 +846,8 @@ async def sse_events(request: Request):
                     break
                 try:
                     msg = await asyncio.wait_for(queue.get(), timeout=15.0)
-                    # SSE spec: each event is "data: ...\n\n"
                     yield f"data: {msg}\n\n"
                 except asyncio.TimeoutError:
-                    # Send a keep-alive comment so the connection stays open
                     yield ": heartbeat\n\n"
         except asyncio.CancelledError:
             pass
@@ -918,7 +860,6 @@ async def sse_events(request: Request):
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            # Tell nginx / any reverse proxy not to buffer this stream
             "X-Accel-Buffering": "no",
         },
     )
@@ -926,15 +867,6 @@ async def sse_events(request: Request):
 
 @app.get("/api/status")
 async def get_system_status():
-    """
-    Snapshot of backend component states, polled every 5 s by status-panel.js.
-
-    Returns:
-        llm_server_running  — whether llama-server is currently healthy
-        active_enrichments  — number of enrichment tasks running right now
-        sessions_with_asr   — 1 if the Qwen3 ASR model is loaded, 0 otherwise
-        active_sessions     — number of live interview sessions
-    """
     return {
         "llm_server_running": _llama_is_healthy(),
         "active_enrichments": _active_enrichments,

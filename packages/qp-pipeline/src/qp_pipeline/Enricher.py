@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Deque, Dict, List, Optional, Set, Tuple
 
+import numpy as np
 from json_repair import repair_json
 from openai import OpenAI
 from rapidfuzz import fuzz
@@ -20,7 +21,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 from rich.panel import Panel
 from rich.table import Table
-from sentence_transformers import SentenceTransformer, util
+from sentence_transformers import CrossEncoder, SentenceTransformer, util
 
 # ---------------- ROBUST PROJECT ROOT DETECTION ----------------
 _env_root = os.environ.get("RAG_PROJECT_ROOT")
@@ -47,15 +48,14 @@ except ImportError:
 LLAMA_API_URL = "http://localhost:8080/v1"
 MODEL_NAME = "lfm-2.5-1.2b"
 
-# B21: Was 4. llama-server processes exactly one request at a time, so multiple
-# workers only add thread-switching overhead. Set to 1 for sequential processing.
 MAX_WORKERS = 1
 
-QUOTE_MATCH_THRESHOLD = 70.0
+QUOTE_MATCH_THRESHOLD = 60.0
 DEDUP_SIMILARITY_THRESHOLD = 80
 MIN_TOKENS_FOR_METADATA = 30
 MIN_TOKENS_FOR_QA = 30
 MIN_SUMMARY_TOKENS = 10
+QUOTE_MIN_CHARS = 25  # Relaxed from 40
 
 DIFFICULTY_TYPE = {
     "Easy": "Fact",
@@ -83,26 +83,14 @@ logging.basicConfig(
 logger = logging.getLogger("Enricher")
 
 
-QUOTE_MIN_CHARS = 40  # require substantive quotes
-
-
 def _quote_is_grounded(quote: str, content: str) -> tuple[bool, str]:
-    """
-    Returns (is_grounded, reason).
-    Two-step check:
-      1. Minimum length — short quotes are not specific enough to be useful.
-      2. Exact or near-exact substring — the quote must appear in the content
-         with high fidelity (not just share common words).
-    """
     quote = quote.strip()
     if len(quote) < QUOTE_MIN_CHARS:
         return False, f"Quote too short ({len(quote)} chars, min {QUOTE_MIN_CHARS})"
 
-    # Try exact first (fast)
     if quote.lower() in content.lower():
         return True, "exact"
 
-    # Fuzzy fallback for minor OCR/formatting differences
     score = fuzz.partial_ratio(quote.lower(), content.lower())
     if score >= QUOTE_MATCH_THRESHOLD:
         return True, f"fuzzy ({score:.0f}%)"
@@ -115,12 +103,6 @@ def _content_words(t: str):
 
 
 def _ensure_dict(value: Any) -> Dict[str, Any]:
-    """
-    Guarantee the return value is a dict.
-    - dict  → return as-is
-    - list of one dict → unwrap (model sometimes wraps in an array)
-    - anything else    → return {} so caller degrades gracefully
-    """
     if isinstance(value, dict):
         return value
     if isinstance(value, list) and len(value) == 1 and isinstance(value[0], dict):
@@ -128,37 +110,44 @@ def _ensure_dict(value: Any) -> Dict[str, Any]:
         return value[0]
     if isinstance(value, list) and value:
         logger.warning(
-            f"JSON parsed as list with {len(value)} elements — "
-            "expected a dict. Returning empty."
+            f"JSON parsed as list with {len(value)} elements — expected a dict. Returning empty."
         )
     return {}
 
 
 def get_questions_per_difficulty(estimated_tokens: int) -> int:
-    """
-    Scale question quota to chunk size.
-    Asking for 9 questions (3 per difficulty) from an 80-token paragraph
-    forces the model to duplicate or hallucinate — small chunks get fewer.
-    """
     if estimated_tokens < 80:
-        return 1  # ~60 words: one question per difficulty max
+        return 1
     elif estimated_tokens < 200:
-        return 2  # medium chunk
+        return 2
     else:
-        return 3  # large chunk only
+        return 3
 
 
 class AnswerValidator:
-    SIMILARITY_THRESHOLD = 0.55
-    LEXICAL_OVERLAP_THRESHOLD = 0.75
+    SIMILARITY_THRESHOLD = 0.50
+    LEXICAL_OVERLAP_THRESHOLD = (
+        0.30  # Baseline gate: must have at least 30% word overlap
+    )
+    ENTAILMENT_THRESHOLD = 0.60
+    CONTRADICTION_THRESHOLD = 0.60
     MIN_SENTENCES = 1
     MAX_SENTENCES = 5
 
-    def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5"):
-        logger.info(f"Loading Validator Embedding Model: {model_name}...")
-        self.model = SentenceTransformer(model_name)
+    def __init__(
+        self,
+        bi_model_name: str = "BAAI/bge-small-en-v1.5",
+        ce_model_name: str = "cross-encoder/nli-deberta-v3-xsmall",
+    ):
+        logger.info(f"Loading Validator Bi-Encoder: {bi_model_name}...")
+        self.bi_encoder = SentenceTransformer(bi_model_name)
 
-    def validate(self, question: str, answer: str, chunk: str) -> Tuple[bool, str]:
+        logger.info(f"Loading Validator Cross-Encoder (NLI): {ce_model_name}...")
+        self.cross_encoder = CrossEncoder(ce_model_name)
+
+    def validate(
+        self, question: str, answer: str, chunk: str, source_quote: str
+    ) -> Tuple[bool, str]:
         if not answer or not answer.strip():
             return False, "Empty answer"
 
@@ -166,19 +155,62 @@ class AnswerValidator:
         if not struct_ok:
             return False, f"Structural fail: {sent_count} sentences"
 
-        embeddings = self.model.encode([chunk, answer], convert_to_tensor=True)
-        score = float(util.cos_sim(embeddings[0], embeddings[1]))
-        if score < self.SIMILARITY_THRESHOLD:
-            return False, f"Semantic fail: cos={score:.3f}"
-
+        # GATE 1: Lexical (Always run)
         c_words = self._content_words(chunk)
         a_words = self._content_words(answer)
         if not a_words:
-            return False, "No content words"
+            return False, "No content words in answer"
+
         overlap = len(c_words & a_words) / len(a_words)
         if overlap < self.LEXICAL_OVERLAP_THRESHOLD:
-            return False, f"Lexical fail: overlap={overlap:.3f}"
+            return (
+                False,
+                f"Lexical fail: overlap={overlap:.2f} (gate is {self.LEXICAL_OVERLAP_THRESHOLD})",
+            )
 
+        # GATE 2: Bi-Encoder Similarity (Answer vs Quote & Answer vs Chunk)
+        embeddings = self.bi_encoder.encode(
+            [answer, source_quote, chunk], convert_to_tensor=True
+        )
+        ans_emb, quote_emb, chunk_emb = embeddings[0], embeddings[1], embeddings[2]
+
+        # Use .item() to safely extract the scalar value and avoid PyTorch ValueError
+        sim_ans_quote = util.cos_sim(ans_emb, quote_emb).item()
+        sim_ans_chunk = util.cos_sim(ans_emb, chunk_emb).item()
+
+        bi_score = max(sim_ans_quote, sim_ans_chunk)
+
+        # GATE 3: Cross-Encoder NLI (Answer vs Source Quote)
+        logits = self.cross_encoder.predict([[source_quote, answer]])
+        e = np.exp(np.array(logits[0], dtype=np.float64) - np.max(logits[0]))
+        probs = e / e.sum()
+
+        p_contra = probs[0]
+        p_entail = probs[1]
+        p_neutral = probs[2]
+
+        if p_contra > self.CONTRADICTION_THRESHOLD:
+            return (
+                False,
+                f"NLI Contradiction ({p_contra:.2f} > {self.CONTRADICTION_THRESHOLD})",
+            )
+
+        if p_entail > self.ENTAILMENT_THRESHOLD:
+            if bi_score < 0.40:  # Extremely lenient bi-encoder floor
+                return (
+                    False,
+                    f"Entailed ({p_entail:.2f}), but bi-score too low ({bi_score:.2f})",
+                )
+
+        else:
+            adjusted_bi_score = bi_score * (0.50 + 0.50 * p_entail)
+            if adjusted_bi_score < self.SIMILARITY_THRESHOLD:
+                return (
+                    False,
+                    f"Neutral NLI ({p_neutral:.2f}) dragged down bi-score: {adjusted_bi_score:.2f} < {self.SIMILARITY_THRESHOLD}",
+                )
+
+        # GATE 4: Question Heuristics
         if question.strip().lower().startswith(("why", "how")):
             causal = {
                 "because",
@@ -192,11 +224,12 @@ class AnswerValidator:
                 "enables",
                 "since",
             }
-            answer_words = set(answer.lower().split())
+            answer_words_set = set(answer.lower().split())
             if not any(
-                w in answer.lower() if " " in w else w in answer_words for w in causal
+                w in answer.lower() if " " in w else w in answer_words_set
+                for w in causal
             ):
-                return False, "Why/How-question without causal/mechanism phrase"
+                return False, "Why/How-question lacks causal/mechanism phrase"
 
         return True, ""
 
@@ -217,9 +250,6 @@ class LLMClient:
         self.client = OpenAI(base_url=base_url, api_key=api_key)
 
     def _extract_json(self, text: str) -> Dict[str, Any]:
-        """ """
-
-        # B17: greedy `.*` + re.DOTALL — captures full nested JSON from fenced blocks
         fenced = re.search(r"```json\s*(\{.*\})\s*```", text, re.DOTALL)
         raw = fenced.group(1) if fenced else text
 
@@ -228,7 +258,6 @@ class LLMClient:
             result = _ensure_dict(parsed)
             if result:
                 return result
-            # Fell through (was a list or unexpected type) — try repair below
         except json.JSONDecodeError:
             pass
 
@@ -250,22 +279,14 @@ class LLMClient:
                 messages=[
                     {"role": "system", "content": sys_prompt},
                     {"role": "user", "content": user_prompt},
-                    # Removed the assistant prefill dict to prevent conflicts with
-                    # llama-cpp's thinking tokens.
                 ],
                 temperature=0.1,
-                # top_k and repetition_penalty are llama-server extensions —
-                # the OpenAI Python client rejects them as direct kwargs (TypeError).
-                # They must be forwarded via extra_body.
                 extra_body={
                     "top_k": 50,
                     "repetition_penalty": 1.05,
                 },
             )
             content = response.choices[0].message.content
-
-            # Pass the content directly to the robust extractor, which will
-            # bypass any <think> tags and grab the JSON.
             return self._extract_json(content)
 
         except Exception as e:
@@ -273,39 +294,25 @@ class LLMClient:
             return {}
 
     def _deduplicate_candidates(self, candidates: List[Dict]) -> List[Dict]:
-        """
-        Remove near-duplicate questions by checking both question text AND source quote.
-
-        Two questions may have different wording but target the same sentence —
-        their answers would be nearly identical, so they're pedagogically redundant.
-        Quote-based dedup catches this second case.
-        """
         seen_qs: List[str] = []
         seen_quotes: List[str] = []
         unique: List[Dict] = []
 
         for cand in candidates:
             if not isinstance(cand, dict):
-                # LLM occasionally returns qa_pairs items as arrays instead of dicts.
-                # .get() on a list raises 'list has no attribute get'.
-                logger.debug(f"Candidate skipped (not a dict): {cand!r}")
                 continue
             q = cand.get("question", "").lower().strip()
             quote = cand.get("source_quote", "").lower().strip()
             if not q:
                 continue
 
-            # Reject if question text is too similar to an existing one
             if any(
                 fuzz.token_sort_ratio(q, s) > DEDUP_SIMILARITY_THRESHOLD
                 for s in seen_qs
             ):
-                logger.debug(f"Deduped question (text): {q[:60]}")
                 continue
 
-            # Reject if it targets the exact same sentence as an existing question
             if quote and any(fuzz.partial_ratio(quote, sq) > 90 for sq in seen_quotes):
-                logger.debug(f"Deduped question (shared quote): {q[:60]}")
                 continue
 
             seen_qs.append(q)
@@ -313,16 +320,11 @@ class LLMClient:
                 seen_quotes.append(quote)
             unique.append(cand)
 
-        removed = len(candidates) - len(unique)
-        if removed:
-            logger.info(f"[yellow]Deduplication removed {removed} near-duplicate(s)[/]")
         return unique
 
     @staticmethod
     def _normalize_tags(tags: List[str]) -> List[str]:
-        GENERIC_BLOCKLIST = {
-            " ",
-        }
+        GENERIC_BLOCKLIST = {" "}
 
         def _to_snake(tag: str) -> str:
             s = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", tag.strip())
@@ -335,9 +337,7 @@ class LLMClient:
             if not isinstance(raw, str) or not raw.strip():
                 continue
             normalised = _to_snake(raw)
-            if normalised in GENERIC_BLOCKLIST:
-                continue
-            if normalised in seen:
+            if normalised in GENERIC_BLOCKLIST or normalised in seen:
                 continue
             seen.add(normalised)
             result.append(normalised)
@@ -352,11 +352,6 @@ class LLMClient:
             surface = tag.replace("_", " ")
             if surface in text_lower or tag in text_lower:
                 grounded.append(tag)
-            else:
-                logger.debug(f"Tag ungrounded (removed): {tag!r}")
-        removed = len(tags) - len(grounded)
-        if removed:
-            logger.info(f"[yellow]Tag grounding removed {removed} ungrounded tag(s)[/]")
         return grounded
 
     @staticmethod
@@ -365,25 +360,11 @@ class LLMClient:
         grounded = []
         for t in triplets:
             if not isinstance(t, dict):
-                # LLM occasionally returns triplets as [subj, pred, obj] arrays
-                # instead of {"subject": ..., "predicate": ..., "object": ...} dicts.
-                # Calling .get() on a list raises 'list has no attribute get' — skip.
-                logger.debug(f"Triplet skipped (not a dict): {t!r}")
                 continue
             subj = t.get("subject", "").lower().strip()
             obj = t.get("object", "").lower().strip()
             if subj and obj and subj in text_lower and obj in text_lower:
                 grounded.append(t)
-            else:
-                logger.debug(
-                    f"Triplet ungrounded (removed): ({t.get('subject')!r}, "
-                    f"{t.get('predicate')!r}, {t.get('object')!r})"
-                )
-        removed = len(triplets) - len(grounded)
-        if removed:
-            logger.info(
-                f"[yellow]Triplet grounding removed {removed} ungrounded triplet(s)[/]"
-            )
         return grounded
 
     def generate_metadata(
@@ -394,9 +375,6 @@ class LLMClient:
         content_type: str = "prose",
     ) -> Dict[str, Any]:
         if estimated_tokens < MIN_TOKENS_FOR_METADATA:
-            logger.warning(
-                f"Chunk too small ({estimated_tokens} tokens) — skipping metadata generation"
-            )
             return {}
 
         sys_prompt = (
@@ -406,29 +384,6 @@ class LLMClient:
             "do not verify them a second time. "
             "Extract information ONLY from the TEXT CHUNK — never from context. "
             "Always output valid JSON following the exact schema provided."
-        )
-
-        # Improved summary instruction (forces direct, concise, non-repetitive summaries)
-        summary_instruction = {
-            "math": (
-                "1-2 sentences naming the formula or theorem and stating what it computes "
-                "or proves. Include the formula itself if it fits in one line."
-            ),
-            "code": (
-                "1-2 sentences naming the function or class, describing its inputs, outputs, "
-                "and purpose."
-            ),
-            "table": (
-                "1-2 sentences stating what the table measures and the key values or ranges it contains."
-            ),
-        }.get(
-            content_type,
-            (
-                "Write exactly 2 complete sentences. "
-                "Sentence 1: state the core technical concept or claim. "
-                "Sentence 2: name the specific methods, techniques, or entities mentioned. "
-                "Never start with 'The text', 'This chunk', or 'This section'."
-            ),
         )
 
         user_prompt = f"""
@@ -448,7 +403,7 @@ class LLMClient:
    2. Triplets: Create meaningful subject-predicate-object triples where BOTH subject and object appear in the TEXT CHUNK.
       Predicate must be a single verb or short verb phrase (e.g. "uses", "generates", "improves", "specializes_for").
       Aim for 1–4 high-quality triplets. If none are meaningful, return an empty list.
-   3. Summary: Follow the instruction exactly. Be concise and factual.
+   3. Summary: Write exactly 2 complete sentences. Sentence 1: state the core technical concept or claim. Sentence 2: name the specific methods, techniques, or entities mentioned. Never start with 'The text', 'This chunk', or 'This section'.
 
    {{
    "summary": "[2-sentence factual summary]",
@@ -458,7 +413,6 @@ class LLMClient:
    ]
    }}
    """
-
         return self._call_model(sys_prompt, user_prompt)
 
     def generate_question_candidates(self, chunk: Dict, context_str: str) -> List[Dict]:
@@ -509,11 +463,9 @@ Generate up to {per_diff} '{difficulty}' questions ({instruction}).
 Output ONLY:
 {{"qa_pairs": [ {{"question": "...", "source_quote": "...", "difficulty": "{difficulty}"}}, ... ] }}
 """
-
             result = self._call_model(sys_prompt, user_prompt)
             raw = result.get("qa_pairs", [])
 
-            # Fallback: model emitted flat numbered keys
             if not raw and result:
                 from collections import defaultdict
 
@@ -524,9 +476,6 @@ Output ONLY:
                         groups[m.group(2)][m.group(1)] = v
                 flat_items = [g for g in groups.values() if "question" in g]
                 if flat_items:
-                    logger.warning(
-                        f"Pass 1 [{difficulty}]: model used flat keys — reconstructed {len(flat_items)} item(s)"
-                    )
                     raw = flat_items
 
             count = 0
@@ -539,16 +488,11 @@ Output ONLY:
                 all_candidates.append(item)
                 count += 1
 
-            logger.debug(f"Pass 1 [{difficulty}]: {count} candidate(s)")
-
         return self._deduplicate_candidates(all_candidates)
 
     def generate_reference_answer(
         self, question: str, chunk_content: str, source_quote: str = ""
     ) -> str:
-        """
-        Generate a reference answer for *question* grounded in *chunk_content*.
-        """
         sys_prompt = (
             "You are a knowledgeable technical interviewer writing model reference answers. "
             "Your answers should read like what a well-prepared human candidate would say — "
@@ -557,11 +501,7 @@ Output ONLY:
         )
 
         quote_block = (
-            f"""
-### KEY PASSAGE (this is the specific part of the source that answers the question):
-{source_quote.strip()}
-
-"""
+            f"\n### KEY PASSAGE (this is the specific part of the source that answers the question):\n{source_quote.strip()}\n"
             if source_quote and len(source_quote.strip()) >= 25
             else ""
         )
@@ -586,7 +526,6 @@ Rules (must follow exactly):
 6. If the text gives specific values, thresholds, or named techniques, include them.
 7. If the core subject is completely absent from the source text, output EXACTLY: NOT_ENOUGH_INFORMATION
 """
-
         try:
             response = self.client.chat.completions.create(
                 model=MODEL_NAME,
@@ -618,80 +557,46 @@ class EnrichmentManager:
         ctype = chunk.get("content_type", "prose")
 
         if chunk.get("should_use") != 1:
-            logger.info(f"Chunk {chunk_id[:8]} has should_use=0 — skipping")
             return True, chunk.get("existing_summary", "")
 
         if chunk.get("existing_summary") and self.db.get_questions_for_chunk(chunk_id):
-            logger.info(f"Chunk {chunk_id[:8]} already fully enriched — skipping")
             return True, chunk.get("existing_summary", "")
 
         console.rule(
             f"[bold cyan]Chunk {chunk_id[:8]}[/] | {tokens} tokens | type={ctype}"
         )
 
-        logger.info("[bold]\\[1/3] Generating metadata...[/]")
         meta = self.llm.generate_metadata(
             content, context_str, estimated_tokens=tokens, content_type=ctype
         )
         if not meta:
             if tokens < MIN_TOKENS_FOR_METADATA:
-                logger.warning(f"Chunk {chunk_id[:8]} too small — no metadata or QA")
                 return True, ""
-            logger.error("Metadata generation FAILED — skipping chunk")
             self.db.save_rejections(
                 chunk_id, [{"reason": "Metadata generation failed"}]
             )
             return False, ""
 
-        logger.info(
-            f"[green]✓[/] Metadata OK | "
-            f"tags=[cyan]{meta.get('tags', [])}[/] | "
-            f"{len(meta.get('triplets', []))} triplets"
-        )
-
         meta["tags"] = self.llm._normalize_tags(meta.get("tags", []))
         meta["tags"] = self.llm._verify_tags_grounded(meta["tags"], content)
-        logger.info(f"[dim]Grounded tags:[/] {meta['tags']}")
-
         meta["triplets"] = self.llm._verify_triplets_grounded(
             meta.get("triplets", []), content
         )
-
         self.db.save_enrichment(chunk_id, meta)
 
         if tokens < MIN_TOKENS_FOR_QA:
-            logger.warning(f"Chunk too small ({tokens} tokens) — skipping QA")
             return True, meta.get("summary", "")
 
-        logger.info("[bold]\\[2/3] Pass 1 — generating candidates...[/]")
         candidates = self.llm.generate_question_candidates(chunk, context_str)
-        easy = sum(1 for c in candidates if c.get("difficulty") == "Easy")
-        medium = sum(1 for c in candidates if c.get("difficulty") == "Medium")
-        hard = sum(1 for c in candidates if c.get("difficulty") == "Hard")
-        logger.info(
-            f"[green]✓[/] {len(candidates)} candidates — "
-            f"[blue]Easy={easy}[/]  [yellow]Medium={medium}[/]  [red]Hard={hard}[/]"
-        )
-
         all_valid_qa: List[Dict] = []
         rejected_qa: List[Dict] = []
 
-        logger.info("[bold]\\[3/3] Pass 2 — answer generation & validation...[/]")
         for i, cand in enumerate(candidates):
             question = cand.get("question", "").strip()
             source_quote = cand.get("source_quote", "").strip()
             level = cand.get("difficulty", "Medium")
-            q_preview = question[:80] + ("..." if len(question) > 80 else "")
-
-            level_colour = {"Easy": "blue", "Medium": "yellow", "Hard": "red"}.get(
-                level, "white"
-            )
-            console.print(
-                f"  [{i + 1}/{len(candidates)}] [{level_colour}]\\[{level}][/] {q_preview}"
-            )
 
             if not question or len(source_quote) < 25:
-                console.print("    [red]✗ REJECTED[/] — invalid Pass 1 output")
                 rejected_qa.append(
                     {
                         "level": level,
@@ -703,11 +608,7 @@ class EnrichmentManager:
                 continue
 
             if ctype == "math":
-                quote_ok = source_quote.strip() in content
-                if not quote_ok:
-                    console.print(
-                        "    [red]✗ REJECTED[/] — math quote not found verbatim in chunk"
-                    )
+                if source_quote.strip() not in content:
                     rejected_qa.append(
                         {
                             "level": level,
@@ -719,16 +620,7 @@ class EnrichmentManager:
                     continue
             else:
                 is_grounded, reason = _quote_is_grounded(source_quote, content)
-
-                if is_grounded:
-                    score_colour = "green"
-                    console.print(
-                        f"    Quote match: [{score_colour}]Passed ({reason})[/]"
-                    )
-                else:
-                    console.print(
-                        f"    [red]✗ REJECTED[/] — quote guard failed: {reason}"
-                    )
+                if not is_grounded:
                     rejected_qa.append(
                         {
                             "level": level,
@@ -740,14 +632,11 @@ class EnrichmentManager:
                     continue
 
             answer = self.llm.generate_reference_answer(question, content, source_quote)
-            ans_preview = answer[:100] + ("..." if len(answer) > 100 else "")
-            console.print(f"    [dim]Answer:[/] {ans_preview}")
 
-            normalised = answer.replace("_", " ").upper()
-            if not answer or "NOT ENOUGH INFORMATION" in normalised:
-                console.print(
-                    "    [red]✗ REJECTED[/] — model reported insufficient info"
-                )
+            if (
+                not answer
+                or "NOT ENOUGH INFORMATION" in answer.replace("_", " ").upper()
+            ):
                 rejected_qa.append(
                     {
                         "level": level,
@@ -758,25 +647,12 @@ class EnrichmentManager:
                 )
                 continue
 
-            # ── Post-hoc quote relevance check ────────────────────────────────
-            # The Pass 1 quote guard only verified the quote exists in the chunk.
-            # Now that we have the answer, verify the quote actually contains the
-            # answer content — not just the topic-introduction sentence.
-            # If the answer and quote share very few content words, the model
-            # picked the wrong sentence as the source (e.g. "there are two reasons"
-            # instead of the sentences that describe what those reasons are).
             if source_quote and ctype != "math":
                 answer_words = _content_words(answer)
                 quote_words = _content_words(source_quote)
                 if answer_words and quote_words:
                     overlap = len(answer_words & quote_words) / len(answer_words)
                     if overlap < 0.12:
-                        # Quote and answer share almost no content words — Pass 1
-                        # extracted a setup/intro sentence instead of the answer-bearing one.
-                        #
-                        # RESCUE: scan the chunk sentence by sentence and promote the one
-                        # with the best content-word overlap to the answer. This stays fully
-                        # grounded in verbatim document text — no hallucination risk.
                         sentences = [
                             s.strip()
                             for s in re.split(r"(?<=[.!?])\s+", content)
@@ -791,52 +667,39 @@ class EnrichmentManager:
                                 )
                                 if sent_overlap > best_overlap:
                                     best_overlap, best_sent = sent_overlap, sent
-
-                        RESCUE_THRESHOLD = 0.20
-                        if best_overlap >= RESCUE_THRESHOLD and best_sent:
-                            console.print(
-                                f"    [yellow]⚠ RESCUED[/] — swapped quote to best-matching "
-                                f"sentence ({best_overlap:.0%} overlap)"
-                            )
+                        if best_overlap >= 0.20 and best_sent:
                             source_quote = best_sent
                             cand["source_quote"] = best_sent
-                            overlap = best_overlap
                         else:
-                            console.print(
-                                f"    [red]✗ REJECTED[/] — quote/answer mismatch "
-                                f"({overlap:.0%} overlap); best rescue only "
-                                f"{best_overlap:.0%}. Pass 1 grabbed the wrong sentence."
-                            )
                             rejected_qa.append(
                                 {
                                     "level": level,
                                     "question": question,
                                     "answer": answer,
-                                    "reason": f"Quote/answer mismatch ({overlap:.0%} overlap)",
+                                    "reason": f"Quote/answer mismatch",
                                 }
                             )
                             continue
 
             if DEFLECTION_PATTERN.search(answer):
-                console.print("    [red]✗ REJECTED[/] — deflection phrase detected")
                 rejected_qa.append(
                     {
                         "level": level,
                         "question": question,
                         "answer": answer,
-                        "reason": f"Deflection: '{answer[:80]}'",
+                        "reason": "Deflection",
                     }
                 )
                 continue
 
-            is_valid, reason = self.validator.validate(question, answer, content)
+            is_valid, reason = self.validator.validate(
+                question, answer, content, source_quote
+            )
             if is_valid:
                 cand["answer"] = answer
                 cand["type"] = DIFFICULTY_TYPE.get(level, "Fact")
                 all_valid_qa.append(cand)
-                console.print("    [green]✅ ACCEPTED[/]")
             else:
-                console.print(f"    [red]✗ REJECTED[/] — {reason}")
                 rejected_qa.append(
                     {
                         "level": level,
@@ -848,61 +711,29 @@ class EnrichmentManager:
 
         if all_valid_qa:
             self.db.save_questions(chunk_id, all_valid_qa)
-
         if rejected_qa:
             self.db.save_rejections(chunk_id, rejected_qa)
-
-        summary_table = Table.grid(padding=(0, 2))
-        summary_table.add_row(
-            f"[green]✅ Accepted:[/] {len(all_valid_qa)}",
-            f"[red]✗ Rejected:[/] {len(rejected_qa)}",
-            f"[dim]Total:[/] {len(candidates)}",
-        )
-        console.print(
-            Panel(
-                summary_table, title=f"[cyan]Chunk {chunk_id[:8]} done[/]", expand=False
-            )
-        )
 
         return True, meta.get("summary", "")
 
     def enrich_single_file(self, file_id: str) -> None:
         chunks = self.db.get_chunks_for_file_ordered(file_id)
-        total = len(chunks)
-
-        console.print(
-            Panel(
-                f"[bold]File:[/] {file_id}\n[bold]Chunks:[/] {total}",
-                title="[bold cyan]📂 Enriching Single File[/]",
-                expand=False,
-            )
-        )
-
         if not chunks:
-            logger.warning(f"No processable chunks found for file {file_id[:8]}")
             return
 
         chunk_map = {c["chunk_id"]: c["content"] for c in chunks}
         history: Deque[str] = deque(maxlen=3)
 
-        for i, chunk in enumerate(chunks):
+        for chunk in chunks:
             ctype = chunk.get("content_type", "prose")
-            logger.info(f"Chunk [bold][{i + 1}/{total}][/] — type=[cyan]{ctype}[/]")
-
             if ctype in ["table", "math", "code"]:
                 parts = []
                 prev_id = chunk.get("prev_chunk_id")
                 if prev_id and prev_id in chunk_map:
-                    prev_text = chunk_map[prev_id][:150]
-                    parts.append(
-                        f"PREV: {prev_text}{'...' if len(prev_text) == 150 else ''}"
-                    )
+                    parts.append(f"PREV: {chunk_map[prev_id][:150]}")
                 next_id = chunk.get("next_chunk_id")
                 if next_id and next_id in chunk_map:
-                    next_text = chunk_map[next_id][:150]
-                    parts.append(
-                        f"NEXT: {next_text}{'...' if len(next_text) == 150 else ''}"
-                    )
+                    parts.append(f"NEXT: {chunk_map[next_id][:150]}")
                 context_str = (
                     "\n".join(parts) if parts else "No adjacent structural chunks"
                 )
@@ -918,83 +749,22 @@ class EnrichmentManager:
                 and len(summary.split()) >= MIN_SUMMARY_TOKENS
             ):
                 history.append(summary)
-            elif success and summary:
-                logger.warning(
-                    f"Summary for chunk {chunk.get('chunk_id', '')[:8]} failed quality gate"
-                )
-
-        logger.info(f"[green]✅ File {file_id[:8]} enrichment complete[/]")
-
-    def enrich_single_chunk(
-        self, chunk: Dict, context_str: Optional[str] = None
-    ) -> Dict[str, Any]:
-        ctx = context_str or ""
-        console.print(
-            Panel(
-                f"[bold]Chunk:[/] {chunk.get('chunk_id', 'unknown')[:8]}\n"
-                f"[bold]Tokens:[/] {chunk.get('estimated_tokens', '?')}",
-                title="[bold cyan]🔍 Enriching Single Chunk[/]",
-                expand=False,
-            )
-        )
-        success, summary = self._process_chunk(chunk, ctx)
-        return {
-            "success": success,
-            "summary": summary,
-            "chunk_id": chunk.get("chunk_id", ""),
-        }
 
     def run(self) -> None:
-        console.print(
-            Panel(
-                "[bold green]Two-Pass Enrichment Pipeline[/]\n"
-                f"Model: [cyan]{MODEL_NAME}[/]  |  "
-                f"Workers: [cyan]{MAX_WORKERS}[/]  |  "  # B21: now 1
-                f"Quote threshold: [cyan]{QUOTE_MATCH_THRESHOLD}%[/]",
-                title="[bold]🚀 Starting Pipeline[/]",
-                expand=False,
-            )
-        )
-
-        total_processed = 0
         while True:
             files = self.db.get_pending_files(limit=5)
             if not files:
-                console.print(
-                    Panel(
-                        f"[green]All done.[/] Total files processed: [bold]{total_processed}[/]",
-                        title="✅ Pipeline Complete",
-                        expand=False,
-                    )
-                )
                 break
-
-            logger.info(
-                f"Found [bold]{len(files)}[/] pending file(s) — processing batch..."
-            )
-            with ThreadPoolExecutor(MAX_WORKERS) as ex:  # B21: MAX_WORKERS=1
+            with ThreadPoolExecutor(MAX_WORKERS) as ex:
                 futures = {
                     ex.submit(self.enrich_single_file, fid): fid for fid in files
                 }
                 for future in as_completed(futures):
-                    fid = futures[future]
                     try:
                         future.result()
-                        total_processed += 1
-                        logger.info(
-                            f"[green]✓[/] File {fid[:8]} done — {total_processed} total"
-                        )
                     except Exception as e:
-                        logger.error(f"[red]✗ Thread crash[/] on file {fid[:8]}: {e}")
+                        logger.error(f"Thread crash: {e}")
 
 
 if __name__ == "__main__":
-    console.print(
-        Panel(
-            "[bold cyan]Enricher.py[/] — Production-Grade Two-Pass Pipeline\n"
-            "Generator: [green]LFM 2.5 1.2B[/]  |  Validator: [green]BGE-Small-EN[/]",
-            title="[bold]🐍 Enrichment Pipeline[/]",
-            expand=False,
-        )
-    )
     EnrichmentManager().run()

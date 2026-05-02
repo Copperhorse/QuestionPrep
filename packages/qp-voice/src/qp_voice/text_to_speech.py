@@ -11,16 +11,9 @@ class TextToSpeech:
         # 1. Load the model ONCE during initialization
         self.model = TTSModel.load_model()
         self.sample_rate = self.model.sample_rate
-
-        # 2. Pre-load the voice state to save time during requests
-        # get_state_for_audio_prompt is a relatively slow operation
         self.voice_state = self.model.get_state_for_audio_prompt(voice_name)
         print(f"Model loaded with voice: {voice_name}")
 
-        # 3. OPT: Cache generated WAV bytes by text so repeated questions
-        #    (e.g. a question asked twice across reloads) are served instantly
-        #    without re-running the TTS model.  Keys are the raw text strings;
-        #    values are the raw bytes of the WAV file.
         self._cache: dict[str, bytes] = {}
 
     def generate_wav_bytes(self, text: str) -> io.BytesIO:

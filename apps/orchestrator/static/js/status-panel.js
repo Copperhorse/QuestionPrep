@@ -10,21 +10,6 @@
   const MAX_LINES = 200;
   const STATUS_POLL_MS = 5_000;
   const RECONNECT_MS = 3_000;
-
-  // ── OPT1: Highlight pattern — compiled ONCE at module parse time ────────────
-  //
-  // The original code ran six .replace() calls in sequence, each with its own
-  // regex literal.  Even though modern JS engines cache regex literals, six
-  // separate string traversals still happen per log line.
-  //
-  // This single alternation regex does one traversal.  The capturing group
-  // lets the replacer determine which branch matched by inspecting the first
-  // character — same information the original six patterns encoded, just
-  // unified into one compiled automaton.
-  //
-  // Branch order matters: longer/more-specific patterns come first so they
-  // shadow overlapping shorter ones (e.g. a hex hash that also starts with a
-  // digit should match the hash branch, not the timing branch).
   const _HL_RE = /(✓[^<]*)|(✗[^<]*)|([▶■][^<]*)|([a-f0-9]{8,})|(\d+\.\d+s)/g;
 
   // OPT1: Map from capturing-group index (1-based) to CSS class.
@@ -327,10 +312,6 @@
 
     totalLines++;
 
-    // OPT2: Batch-prune excess lines with a Range deletion.
-    // The old while-loop called removeChild() up to `excess` times, each
-    // triggering a style/layout recalculation.  createRange().deleteContents()
-    // removes all excess nodes in a single DOM mutation — O(1) layout cost.
     const excess = logOutput.children.length - MAX_LINES;
     if (excess > 0) {
       const range = document.createRange();

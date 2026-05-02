@@ -1,12 +1,6 @@
 """
 ChunkEvaluator.py
 
-Fix applied:
-  B06 - filter_chunks was indented 8 spaces instead of 4, making it a nested
-        function inside evaluate_chunks. It took `self` as a parameter (meaningless
-        for a local function), was never callable from outside, and was completely
-        unreachable dead code. Dedented by 4 spaces so it is now a proper instance
-        method of ChunkEvaluator.
 """
 
 import logging

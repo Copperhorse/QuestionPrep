@@ -70,16 +70,9 @@ class QAVectorStore:
         hallucination_score: Optional[float] = None,
         question_id: Optional[str] = None,
     ):
-        # Use the caller-supplied ID when available so Embedder.py can rely on
-        # question_id as the stable Chroma document ID for idempotency checks.
-        # Fall back to a fresh UUID4 for any call that doesn't supply one
-        # (e.g. legacy callers or tests), preserving backwards compatibility.
         question_id = question_id or str(uuid.uuid4())
         created_at = datetime.utcnow().isoformat()
 
-        # Chroma metadata must be flat primitives (str, int, float, bool)
-        # Lists (like tags) usually need to be joined as strings or handled carefully.
-        # Newer Chroma versions support lists, but comma-joined strings are safer for compatibility.
         tags_str = ",".join(tags) if tags else ""
 
         metadata = {

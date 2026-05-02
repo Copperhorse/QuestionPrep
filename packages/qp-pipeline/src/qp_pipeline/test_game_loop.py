@@ -2,15 +2,6 @@
 """
 test_game_loop_fixed.py — Standalone evaluation of the FIXED scoring pipeline.
 
-Fixes applied (no SLM):
-  1. Bidirectional lexical scoring — min(partial_ratio(user→ref), partial_ratio(ref→user))
-     Catches: prefix cutoffs, hallucinations that embed the full reference.
-  2. CE input order swapped to [reference, user_text] (premise=ref, hypothesis=user).
-  3. Length-ratio guard — forces semantic grading when user answer is suspiciously
-     short (cutoff) or long (rambling/hallucination).
-  4. Lexical pass is no longer a free skip — CE always runs when available.
-     Lexical is used as a ceiling/bonus only when length ratio is sane.
-
 Run:  python test_game_loop_fixed.py
 """
 

@@ -3,37 +3,6 @@ Speech-to-Text + Disfluency Detection
 ---------------------------------------
 Uses Qwen3 ASR to transcribe audio and counts disfluency markers
 to flag stuttering/hesitation as a stress signal.
-
-Supports:
-    - Raw PCM bytes (from client WebSocket stream)
-    - .opus/.webm files (converted via ffmpeg before transcription)
-
-Requirements:
-    pip install qwen-asr torch numpy soundfile
-    sudo apt install ffmpeg
-
-Fixes applied:
-  FIX1 - 'import soundfile as sf' was deferred inside _transcribe_array().
-         A missing soundfile package only surfaced at inference time (first
-         live transcription call) instead of at startup, making the root
-         cause very hard to diagnose.  Moved to the module-level imports so
-         the error is raised immediately when the module is loaded.
-
-  FIX2 - decode_opus_bytes() wrote the browser audio to a temp file with
-         suffix='.opus'.  The browser's MediaRecorder produces audio/webm
-         (Chrome) or audio/ogg (Firefox), not a bare Opus stream.  Some
-         ffmpeg builds use the filename extension as a format hint, causing
-         a decode failure.  Changed to suffix='.webm'.  ffmpeg auto-detects
-         the actual container from magic bytes, so this works for both WebM
-         and Ogg audio.
-
-  FIX3 - Added a pipe-based fast path to decode_opus_bytes().  ffmpeg can
-         read directly from stdin for most containers, avoiding a temp-file
-         round-trip.  The disk path (FIX2) is retained as a fallback for
-         containers (like some Matroska/WebM variants) that require seeking.
-
-  B14  - __main__ test block printed result['repetitions'], a key that does
-         not exist.  Fixed to print all three separate repetition keys.
 """
 
 import re

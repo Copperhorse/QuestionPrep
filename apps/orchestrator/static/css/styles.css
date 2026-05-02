@@ -1791,3 +1791,162 @@ footer {
         grid-column: 1 / -1;
     }
 }
+/* ===========================================
+   ADDITIONS — Settings Drawer & Audit Modal
+   =========================================== */
+
+/* ── Settings Drawer (Hardware Accelerated) ── */
+.drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 340px;
+    height: 100vh;
+    background-color: var(--paper-light);
+    box-shadow: -4px 0 25px var(--shadow);
+    transform: translateX(100%);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    border-left: 1px solid var(--border);
+}
+
+.drawer.drawer-open {
+    transform: translateX(0);
+}
+
+.drawer-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.5rem 1.8rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.drawer-header h2 {
+    margin: 0;
+    font-family: "Lora", Georgia, serif;
+}
+
+.drawer-content {
+    padding: 1.8rem;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.drawer-content hr {
+    border: 0;
+    border-top: 1px solid var(--border);
+    margin: 0.5rem 0;
+}
+
+.drawer-btn {
+    padding: 0.85rem 1.2rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: transparent;
+    cursor: pointer;
+    font-weight: 500;
+    text-align: left;
+    color: var(--ink);
+    font-family: "Inter", sans-serif;
+    font-size: 0.95rem;
+    transition:
+        background 0.2s,
+        transform 0.1s;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.drawer-btn:hover {
+    background: rgba(201, 127, 62, 0.05); /* Warm paper hover tint */
+    transform: translateY(-1px);
+}
+
+.danger-text {
+    color: var(--danger);
+}
+.danger-bg {
+    background: var(--danger);
+    color: white;
+    border: none;
+}
+.danger-bg:hover {
+    box-shadow: 0 4px 12px rgba(201, 90, 78, 0.3);
+    color: white;
+}
+
+/* ── File Audit Modal ── */
+.audit-modal {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0;
+    width: 90%;
+    max-width: 750px;
+    box-shadow: 0 16px 40px var(--shadow);
+    background: var(--paper-light);
+    color: var(--ink);
+}
+
+.audit-modal::backdrop {
+    background: rgba(40, 25, 10, 0.45);
+    backdrop-filter: blur(2px);
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.5rem 2rem;
+    background: var(--paper-deep);
+    border-bottom: 1px solid var(--border);
+}
+
+.modal-body {
+    padding: 2rem;
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+.audit-section h3 {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.5rem;
+    margin-bottom: 1rem;
+    color: var(--warm);
+    font-family: "Lora", Georgia, serif;
+}
+
+.audit-list {
+    list-style: none;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.audit-list li {
+    background: var(--paper);
+    padding: 1rem 1.2rem;
+    border-radius: 6px;
+    border-left: 3px solid var(--warm);
+    font-size: 0.9rem;
+    color: var(--ink-light);
+}
+
+.audit-list li strong {
+    color: var(--ink);
+    margin-right: 0.5rem;
+}
+.btn-danger {
+    background: var(--danger-bg, rgba(220, 38, 38, 0.1));
+    color: var(--danger, #dc2626);
+    border: 1px solid var(--danger-border, rgba(220, 38, 38, 0.2));
+}
+
+.btn-danger:hover {
+    background: var(--danger, #dc2626);
+    color: white;
+}

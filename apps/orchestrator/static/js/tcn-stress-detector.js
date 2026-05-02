@@ -1,16 +1,5 @@
 /**
  * tcn-stress-detector.js  —  Main-thread API for TCN stress detection
- *
- * Architecture:
- *   Main Thread                 Web Worker (tcn-worker.js)
- *   ──────────────              ──────────────────────────
- *   TcnStressDetector  ──────►  ort.InferenceSession (TCN)
- *   Web Audio API               Mel spectrogram extraction
- *   AudioContext                FFT + filterbank
- *   ScriptProcessorNode         ONNX inference
- *          │
- *          ▼
- *   onResult(StressResult) callback
  */
 
 console.log("[tcn-stress-detector.js] File loaded, executing...");
@@ -38,8 +27,8 @@ try {
       modelPath = "/static/models/tcn_audio_model.onnx",
       wasmDir = "/static/js/",
       workerPath = "/static/js/tcn-worker.js",
-      clipSeconds = 3,
-      overlapSeconds = 1,
+      clipSeconds = 5,
+      overlapSeconds = 3,
       targetSR = 16000,
     } = {}) {
       this.modelPath = modelPath;
@@ -128,9 +117,6 @@ try {
           return;
         }
 
-        // Important: check Content-Type is application/wasm before caching.
-        // If the server sends the wrong type, streaming compilation will break
-        // when served from cache.
         const ct = response.headers.get("content-type") || "";
         if (
           !ct.includes("application/wasm") &&

@@ -1,56 +1,14 @@
 /* =========================================
    app.js — QuestionPrep Frontend Logic
-
-   Original fixes:
-     B07 - showModal() implemented using .dialog / .alert CSS classes.
-     B24 - pollForNewFile() no longer reads the file count from the DOM.
-
-   Improvements (senior engineer pass):
-
-     OPT1 - fetchUserFiles() builds cards with DocumentFragment + createElement
-            instead of innerHTML +=.  The old approach re-parsed and re-rendered
-            the entire grid innerHTML on every iteration — O(n) re-parses for n
-            files.  A DocumentFragment defers all DOM mutations to a single
-            appendChild call (one layout pass, O(1)).
-
-     OPT2 - _knownFileIds is a Set<string> keyed on file_id.  pollForNewFile()
-            snapshots this Set at upload time and detects arrivals with
-            Set.has() — O(1) per check vs O(n) count comparison.
-            fetchUserFiles() rebuilds the Set from every API response, keeping
-            it perfectly in sync with the server.
-
-     OPT3 - _inFlightGenerations is a Set<string> that guards generateQuestions
-            against duplicate calls for the same file_id (e.g. double-click,
-            rapid re-click).  Prevents the unnecessary second network round-trip;
-            the backend has its own guard but eliminating the call client-side
-            is cheaper.
-
-     OPT4 - Toast notification system replaces notify() for success / info /
-            warning cases.  Toasts are non-blocking: no backdrop, no required
-            click, auto-dismiss after a configurable delay, and stack vertically.
-            showModal is retained only for ERROR-level alerts.
-
-     OPT5 - Drag-and-drop file upload.  The upload zone accepts dragged PDF
-            files.  A shared uploadFile(file) function handles both the
-            button-click and drop paths, eliminating duplicated fetch logic.
-
-     OPT6 - Upload is guarded by a boolean _uploading flag, making it
-            idempotent against multiple clicks during an in-flight request.
 ========================================= */
 
 const API_BASE = "";
 
-// ── OPT2: Canonical file-ID registry ─────────────────────────────────────────
-let _knownFileIds = new Set(); // Set<string> of file_id values
-let _lastKnownFileCount = 0; // kept for any legacy references
-
-// ── OPT3: In-flight generation guard ─────────────────────────────────────────
-const _inFlightGenerations = new Set(); // Set<string> of file_ids with pending requests
-
-// ── OPT6: Upload guard ────────────────────────────────────────────────────────
+let _knownFileIds = new Set();
+let _lastKnownFileCount = 0;
+const _inFlightGenerations = new Set();
 let _uploading = false;
 
-// ── Inline SVG icon helper ────────────────────────────────────────────────────
 const ICON_PATHS = {
   play: '<polygon points="6 3 20 12 6 21 6 3"/>',
   sparkles:
@@ -67,7 +25,6 @@ function icon(name, size = 16) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:middle;flex-shrink:0;">${p}</svg>`;
 }
 
-// ── Minimal HTML escaper for user-supplied strings rendered into cards ────────
 function _escHtml(str) {
   return String(str)
     .replace(/&/g, "&amp;")
@@ -76,12 +33,7 @@ function _escHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
-// ==========================================
-// OPT4: Toast notification system
-// ==========================================
-
 let _toastContainer = null;
-
 function _getToastContainer() {
   if (_toastContainer) return _toastContainer;
   _toastContainer = document.createElement("div");
@@ -90,83 +42,32 @@ function _getToastContainer() {
   return _toastContainer;
 }
 
-/**
- * Display a small non-blocking toast.
- * @param {string} message
- * @param {'success'|'info'|'warning'|'error'} type
- * @param {number} durationMs  0 = manual dismiss only
- * @returns {Function} dismiss function (call early if needed)
- */
 function toast(message, type = "info", durationMs = 4500) {
   const container = _getToastContainer();
   const el = document.createElement("div");
   el.className = `qp-toast qp-toast-${type}`;
-  el.innerHTML = `<span class="qp-toast-msg">${message}</span>
-    <button class="qp-toast-close" aria-label="Dismiss">\u00d7</button>`;
-
+  el.innerHTML = `<span class="qp-toast-msg">${message}</span><button class="qp-toast-close" aria-label="Dismiss">\u00d7</button>`;
   const remove = () => {
     el.classList.add("qp-toast-out");
     el.addEventListener("animationend", () => el.remove(), { once: true });
   };
-
   el.querySelector(".qp-toast-close").addEventListener("click", remove);
   container.appendChild(el);
   if (durationMs > 0) setTimeout(remove, durationMs);
   return remove;
 }
 
-// ==========================================
-// B07: showModal — blocking, for errors only
-// ==========================================
 function showModal(title, body, type = "info") {
-  const alertClass =
-    {
-      success: "alert-success",
-      error: "alert-danger",
-      warning: "alert-warning",
-      info: "alert-info",
-    }[type] || "alert-info";
-
-  const backdrop = document.createElement("div");
-  backdrop.className = "dialog-backdrop";
-  backdrop.innerHTML = `
-    <div class="dialog" role="dialog" aria-modal="true" aria-label="${title}">
-      <div class="dialog-header">${title}</div>
-      <div class="alert ${alertClass}" style="margin:0.5rem 0 1.2rem;border-radius:6px;">${body}</div>
-      <div style="text-align:right;">
-        <button class="btn btn-outline btn-sm" id="modal-close-btn">${icon("x")} Dismiss</button>
-      </div>
-    </div>`;
-
-  document.body.appendChild(backdrop);
-
-  const close = () => {
-    backdrop.remove();
-    clearTimeout(autoClose);
-  };
-  document.getElementById("modal-close-btn").addEventListener("click", close);
-  backdrop.addEventListener("click", (e) => {
-    if (e.target === backdrop) close();
-  });
-  const autoClose = type !== "error" ? setTimeout(close, 5000) : null;
+  toast(`<strong>${title}:</strong> ${body}`, type, 0);
 }
 
-/**
- * Route success/info/warning to toast (non-blocking),
- * error to showModal (blocking, requires acknowledgement).
- */
 function notify(title, body, type = "info") {
-  if (type === "error") {
-    showModal(title, body, type);
-  } else {
-    toast(`<strong>${title}:</strong> ${body}`, type);
-  }
+  toast(`<strong>${title}:</strong> ${body}`, type);
 }
 
 // ==========================================
-// 1. AUTHENTICATION LOGIC
+// AUTHENTICATION LOGIC
 // ==========================================
-
 const loginForm = document.getElementById("login-form");
 if (loginForm) {
   loginForm.addEventListener("submit", async (e) => {
@@ -192,11 +93,7 @@ if (loginForm) {
         notify("Login failed", data.detail, "error");
       }
     } catch {
-      notify(
-        "Network error",
-        "Could not reach the server. Is the FastAPI server running?",
-        "error",
-      );
+      notify("Network error", "Could not reach the server.", "error");
     } finally {
       submitBtn.innerText = orig;
       submitBtn.disabled = false;
@@ -244,11 +141,9 @@ if (signupForm) {
 }
 
 // ==========================================
-// 2. QUESTION GENERATION
+// QUESTION GENERATION
 // ==========================================
-
 async function generateQuestions(fileId, btn) {
-  // OPT3: Prevent duplicate in-flight requests for the same file.
   if (_inFlightGenerations.has(fileId)) return;
   _inFlightGenerations.add(fileId);
 
@@ -264,41 +159,96 @@ async function generateQuestions(fileId, btn) {
     });
     const data = await response.json();
     if (response.ok) {
-      btn.innerHTML = `${icon("check")} Generating in background`;
+      if (data.skipped) {
+        notify("Skipped", data.message, "info");
+        btn.innerHTML = originalHTML;
+        btn.disabled = false;
+        return;
+      }
+      btn.innerHTML = `${icon("check")} Generating`;
       btn.style.background = "var(--bg-success)";
       btn.style.color = "var(--success)";
       btn.style.borderColor = "var(--success)";
     } else {
-      notify("Generation failed", data.detail, "error");
+      notify("Generation failed", data.detail || data.message, "warning");
       btn.innerHTML = originalHTML;
       btn.disabled = false;
     }
   } catch {
-    notify(
-      "Network error",
-      "A network error occurred during question generation.",
-      "error",
-    );
+    notify("Network error", "A network error occurred.", "error");
     btn.innerHTML = originalHTML;
     btn.disabled = false;
   } finally {
-    _inFlightGenerations.delete(fileId); // always release the guard
+    _inFlightGenerations.delete(fileId);
   }
 }
 
 // ==========================================
-// 3. DYNAMIC FILE FETCHING
+// FILE FETCHING & MODAL LOGIC
 // ==========================================
+// ==========================================
+// DELETE SINGLE FILE
+// ==========================================
+async function deleteFile(fileId, fileName, btn) {
+  if (
+    !confirm(
+      `Are you sure you want to delete "${fileName}"? This will also remove all generated questions and embeddings.`,
+    )
+  ) {
+    return;
+  }
 
+  const userId = localStorage.getItem("qp_user_id");
+  if (!userId) {
+    window.location.href = "/login";
+    return;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = `${icon("sparkles")} Deleting…`;
+
+  try {
+    const response = await fetch(
+      `${API_BASE}/api/files/${fileId}?user_id=${userId}`,
+      {
+        method: "DELETE",
+      },
+    );
+    const data = await response.json();
+
+    if (response.ok) {
+      notify("Deleted", `"${fileName}" has been removed.`, "success");
+      // Remove the card from the DOM
+      const card = btn.closest(".file-card");
+      if (card) {
+        card.style.transition = "opacity 0.3s ease, transform 0.3s ease";
+        card.style.opacity = "0";
+        card.style.transform = "scale(0.95)";
+        setTimeout(() => card.remove(), 300);
+      }
+      // Refresh the file list to update state
+      setTimeout(fetchUserFiles, 350);
+    } else {
+      notify("Delete failed", data.detail || "Could not delete file.", "error");
+      btn.disabled = false;
+      btn.innerHTML = `${icon("x")} Delete`;
+    }
+  } catch {
+    notify(
+      "Network error",
+      "A network error occurred while deleting.",
+      "error",
+    );
+    btn.disabled = false;
+    btn.innerHTML = `${icon("x")} Delete`;
+  }
+}
 async function fetchUserFiles() {
   const userId = localStorage.getItem("qp_user_id");
   const filesGrid = document.getElementById("files-grid");
   if (!userId || !filesGrid) return;
 
-  filesGrid.innerHTML = `
-    <p style="grid-column:1/-1;text-align:center;color:var(--ink-very-light);font-style:italic;font-family:'Lora',serif;">
-      Loading your files\u2026
-    </p>`;
+  filesGrid.innerHTML = `<p style="grid-column:1/-1;text-align:center;color:var(--ink-very-light);font-style:italic;">Loading your files\u2026</p>`;
 
   try {
     const response = await fetch(`${API_BASE}/api/files?user_id=${userId}`);
@@ -310,26 +260,14 @@ async function fetchUserFiles() {
     }
 
     const files = data.files ?? [];
-
-    // OPT2: Rebuild the canonical Set from the authoritative server response.
     _knownFileIds = new Set(files.map((f) => f.file_id || f.id));
-    _lastKnownFileCount = _knownFileIds.size;
 
     filesGrid.innerHTML = "";
-
     if (files.length === 0) {
-      filesGrid.innerHTML = `
-        <p style="grid-column:1/-1;text-align:center;color:var(--ink-very-light);font-style:italic;font-family:'Lora',serif;">
-          No PDFs uploaded yet. Start by uploading a document above.
-        </p>`;
+      filesGrid.innerHTML = `<p style="grid-column:1/-1;text-align:center;color:var(--ink-very-light);font-style:italic;">No PDFs uploaded yet. Start by uploading a document above.</p>`;
       return;
     }
 
-    // OPT1: Build all card elements in a DocumentFragment.
-    // innerHTML += triggers a full re-parse of everything already in filesGrid
-    // on every iteration — O(chars_in_grid × n_files) work.
-    // A DocumentFragment accumulates all nodes off-screen, then a single
-    // appendChild flushes them in one layout/paint pass.
     const frag = document.createDocumentFragment();
 
     files.forEach((file) => {
@@ -342,28 +280,35 @@ async function fetchUserFiles() {
 
       const card = document.createElement("div");
       card.className = "file-card";
-      card.dataset.fileId = fileId; // useful for incremental diffing in future
+      card.dataset.fileId = fileId;
+
+      // Attach Audit Listener
+      card.addEventListener("click", (e) => {
+        // Ignore clicks on inner buttons/links
+        if (e.target.closest("button") || e.target.closest("a")) return;
+        openAuditModal(fileId, fileName);
+      });
 
       card.innerHTML = `
         <div class="file-card-title">${_escHtml(fileName)}</div>
         <div class="file-card-meta">Uploaded: ${uploaded}</div>
         <div class="file-card-actions">
-          <button class="btn btn-outline btn-sm"
-                  onclick="generateQuestions('${fileId}', this)">
+          <button class="btn btn-outline btn-sm" onclick="generateQuestions('${fileId}', this)">
             ${icon("sparkles")} Generate Questions
           </button>
-          <a href="/interview?file_id=${fileId}" class="btn btn-primary btn-sm"
-             style="justify-content:center;text-align:center;">
+          <a href="/interview" class="btn btn-primary btn-sm" style="justify-content:center;text-align:center;">
             ${icon("play")} Start Interview
           </a>
+          <button class="btn btn-danger btn-sm" onclick="deleteFile('${fileId}', '${_escHtml(fileName).replace(/'/g, "\\'")}', this)" style="margin-left:auto;">
+            ${icon("x")} Delete
+          </button>
         </div>`;
 
       frag.appendChild(card);
     });
 
-    filesGrid.appendChild(frag); // single DOM mutation
+    filesGrid.appendChild(frag);
   } catch (error) {
-    console.error("Error fetching files:", error);
     filesGrid.innerHTML = `<p style="grid-column:1/-1;color:var(--danger);">Failed to load your files.</p>`;
   }
 }
@@ -371,31 +316,191 @@ async function fetchUserFiles() {
 document.addEventListener("DOMContentLoaded", fetchUserFiles);
 
 // ==========================================
-// 4. FILE UPLOAD  (shared logic for button + drop)
+// X-RAY AUDIT MODAL
 // ==========================================
+async function openAuditModal(fileId, fileName) {
+  const modal = document.getElementById("file-summary-modal");
+  if (!modal) return;
 
-/**
- * OPT5 + OPT6: Central upload function.  Called by the button-click handler
- * and the drag-and-drop handler so there is a single code path.
- * Guarded by _uploading to prevent concurrent submissions.
- */
+  try {
+    const res = await fetch(`/api/files/${fileId}/audit`);
+    const data = await res.json();
+
+    document.getElementById("modal-file-title").innerText =
+      fileName || "File Details";
+    document.getElementById("modal-q-count").innerText =
+      data.total_questions || 0;
+
+    const qList = document.getElementById("modal-questions-list");
+    qList.innerHTML = "";
+    if (data.questions && data.questions.length > 0) {
+      data.questions.forEach((q) => {
+        const li = document.createElement("li");
+        li.innerHTML = `<strong>[${q.difficulty || "N/A"}]</strong> ${_escHtml(q.question_text)}`;
+        qList.appendChild(li);
+      });
+    } else {
+      qList.innerHTML = `<li style="border-left:none; font-style:italic;">No questions generated yet.</li>`;
+    }
+
+    const rejList = document.getElementById("modal-rejected-list");
+    rejList.innerHTML = "";
+    if (data.rejected && data.rejected.length > 0) {
+      data.rejected.forEach((r) => {
+        const li = document.createElement("li");
+        li.style.borderLeftColor = "var(--danger)";
+        li.innerHTML = `<strong>[${_escHtml(r.reason)}]</strong> ${_escHtml(r.question_text || "Unknown Fragment")}`;
+        rejList.appendChild(li);
+      });
+    } else {
+      rejList.innerHTML = `<li style="border-left:none; font-style:italic;">No rejected fragments.</li>`;
+    }
+
+    modal.showModal();
+  } catch (error) {
+    notify("Error", "Failed to load audit data.", "error");
+  }
+}
+
+// ==========================================
+// SETTINGS DRAWER & THEME TOGGLE
+// ==========================================
+document.addEventListener("DOMContentLoaded", () => {
+  const userId = localStorage.getItem("qp_user_id");
+
+  // Theme logic
+  const themeBtn = document.getElementById("theme-toggle");
+  if (themeBtn) {
+    themeBtn.addEventListener("click", () => {
+      const root = document.documentElement;
+      const isLight = root.getAttribute("data-theme") === "light";
+      if (isLight) {
+        root.removeAttribute("data-theme");
+        localStorage.setItem("qp-theme", "dark");
+      } else {
+        root.setAttribute("data-theme", "light");
+        localStorage.setItem("qp-theme", "light");
+      }
+    });
+  }
+
+  // Drawer toggles
+  const drawer = document.getElementById("settings-drawer");
+  const menuBtn = document.getElementById("menu-toggle");
+  const closeBtn = document.getElementById("close-drawer");
+
+  if (menuBtn && drawer) {
+    menuBtn.addEventListener("click", () =>
+      drawer.classList.add("drawer-open"),
+    );
+    closeBtn.addEventListener("click", () =>
+      drawer.classList.remove("drawer-open"),
+    );
+  }
+
+  // Modal close
+  const modal = document.getElementById("file-summary-modal");
+  if (modal) {
+    document
+      .getElementById("close-modal")
+      .addEventListener("click", () => modal.close());
+    modal.addEventListener("click", (e) => {
+      const dims = modal.getBoundingClientRect();
+      if (
+        e.clientX < dims.left ||
+        e.clientX > dims.right ||
+        e.clientY < dims.top ||
+        e.clientY > dims.bottom
+      ) {
+        modal.close();
+      }
+    });
+  }
+
+  // Action Logic
+  document.getElementById("btn-logout")?.addEventListener("click", () => {
+    localStorage.clear();
+    window.location.href = "/login";
+  });
+
+  document
+    .getElementById("btn-delete-account")
+    ?.addEventListener("click", async () => {
+      if (!userId) return;
+      if (
+        confirm(
+          "WARNING: This will permanently delete your account, all files, and all interview history. Proceed?",
+        )
+      ) {
+        try {
+          const res = await fetch(`/api/users/${userId}`, { method: "DELETE" });
+          if (res.ok) {
+            localStorage.clear();
+            window.location.href = "/login";
+          }
+        } catch (e) {
+          notify("Error", "Failed to delete account", "error");
+        }
+      }
+    });
+
+  document
+    .getElementById("btn-delete-files")
+    ?.addEventListener("click", async () => {
+      if (!userId) return;
+      if (
+        confirm(
+          "Are you sure you want to delete all uploaded files and generated questions?",
+        )
+      ) {
+        try {
+          const res = await fetch(`/api/files/all/${userId}`, {
+            method: "DELETE",
+          });
+          if (res.ok) {
+            notify("Success", "All files deleted.", "success");
+            fetchUserFiles();
+            if (drawer) drawer.classList.remove("drawer-open");
+          }
+        } catch (e) {
+          notify("Error", "Failed to delete files", "error");
+        }
+      }
+    });
+
+  document
+    .getElementById("btn-change-email")
+    ?.addEventListener("click", async () => {
+      if (!userId) return;
+      const newEmail = prompt("Enter your new email address:");
+      if (newEmail) {
+        try {
+          const res = await fetch(`/api/users/${userId}/email`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ new_email: newEmail }),
+          });
+          if (res.ok)
+            notify("Success", "Email updated successfully.", "success");
+          else notify("Error", "Failed to update email.", "error");
+        } catch (e) {
+          notify("Error", "Failed to reach server.", "error");
+        }
+      }
+    });
+});
+
+// ==========================================
+// FILE UPLOAD (shared logic for button + drop)
+// ==========================================
 async function uploadFile(file) {
   if (_uploading) return;
-
   const userId = localStorage.getItem("qp_user_id");
   if (!userId) {
-    notify("Not logged in", "You must be logged in to upload files.", "error");
     window.location.href = "/login";
     return;
   }
-  if (!file) {
-    notify(
-      "No file selected",
-      "Please select a PDF file before uploading.",
-      "info",
-    );
-    return;
-  }
+  if (!file) return;
 
   const uploadBtn = document.getElementById("upload-btn");
   const fileInput = document.getElementById("pdf-upload");
@@ -422,11 +527,7 @@ async function uploadFile(file) {
     const data = await response.json();
     if (response.ok) {
       if (fileInput) fileInput.value = "";
-      notify(
-        "Upload successful",
-        "Your file is being ingested. Once it appears below, click \u201cGenerate Questions\u201d.",
-        "success",
-      );
+      notify("Upload successful", "Your file is being ingested.", "success");
       pollForNewFile();
     } else {
       notify("Upload failed", data.detail, "error");
@@ -442,14 +543,12 @@ async function uploadFile(file) {
   }
 }
 
-// ── Button path ────────────────────────────────────────────────────────────────
 const _uploadBtn = document.getElementById("upload-btn");
 const _fileInput = document.getElementById("pdf-upload");
 if (_uploadBtn && _fileInput) {
   _uploadBtn.addEventListener("click", () => uploadFile(_fileInput.files[0]));
 }
 
-// ── OPT5: Drag-and-drop path ──────────────────────────────────────────────────
 const dropZone = document.getElementById("upload-drop-zone");
 if (dropZone) {
   dropZone.addEventListener("dragenter", (e) => {
@@ -461,8 +560,6 @@ if (dropZone) {
     dropZone.classList.add("drag-over");
   });
   dropZone.addEventListener("dragleave", (e) => {
-    // Only remove the class when the pointer genuinely leaves the zone
-    // (not when it enters a child element inside it).
     if (!dropZone.contains(e.relatedTarget))
       dropZone.classList.remove("drag-over");
   });
@@ -470,32 +567,24 @@ if (dropZone) {
     e.preventDefault();
     dropZone.classList.remove("drag-over");
     const file = e.dataTransfer.files[0];
-    if (file?.type === "application/pdf") {
-      uploadFile(file);
-    } else if (file) {
-      toast("Only PDF files are accepted.", "warning");
-    }
+    if (file?.type === "application/pdf") uploadFile(file);
+    else if (file) toast("Only PDF files are accepted.", "warning");
   });
-
-  // Clicking the zone (but not the button or input directly) opens the picker
   dropZone.addEventListener("click", (e) => {
     if (e.target !== _fileInput && e.target !== _uploadBtn) _fileInput?.click();
   });
 }
 
 // ==========================================
-// 5. POLL FOR NEW FILE AFTER UPLOAD
+// POLL FOR NEW FILE AFTER UPLOAD
 // ==========================================
-
 async function pollForNewFile() {
   const userId = localStorage.getItem("qp_user_id");
   if (!userId) return;
 
-  // OPT2: Snapshot the current known IDs.  The poller looks for any file_id
-  // that was absent from this snapshot — O(1) per check with Set.has().
   const baselineIds = new Set(_knownFileIds);
   let attempts = 0;
-  const maxAttempts = 18; // 90 s total at 5 s intervals
+  const maxAttempts = 18;
 
   const interval = setInterval(async () => {
     attempts++;

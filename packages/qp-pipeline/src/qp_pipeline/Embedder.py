@@ -1,15 +1,5 @@
 """
 Embedder.py — QA Vector Store + Indexer
-
-Fix applied:
-  B12 - VectorIndexer.delete_embeddings_for_file() added.
-        DBManager.delete_file() removes all SQL records but previously never
-        touched the Chroma collection. Deleted files' embeddings remained in
-        chroma_store permanently, causing stale semantic-search results and
-        unbounded vector-store growth.
-        The DELETE /api/files/{file_id} endpoint in main.py now calls
-        delete_embeddings_for_file() before delete_file() so both stores stay
-        in sync.
 """
 
 import logging

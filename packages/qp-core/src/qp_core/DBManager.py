@@ -1,11 +1,6 @@
 """
 DBManager.py
-
-Fixes applied:
-  B01 - password_hash column added to users table.
-        create_user() now hashes the password with PBKDF2-HMAC-SHA256 (stdlib).
-        verify_password() added for login.
-        get_user_by_id/username no longer return the hash in the dict (safety).
+.
 """
 
 import hashlib
@@ -47,12 +42,6 @@ class DBManager:
 
     @staticmethod
     def _hash_password(password: str) -> str:
-        """
-        B01: Hash a plaintext password using PBKDF2-HMAC-SHA256 with a random salt.
-        Returns a single storable string: '<hex_salt>:<hex_hash>'.
-        Uses only Python stdlib — no external dependency required.
-        For production, replace with bcrypt or argon2-cffi.
-        """
         salt = secrets.token_hex(16)
         pw_hash = hashlib.pbkdf2_hmac(
             "sha256",
@@ -64,7 +53,6 @@ class DBManager:
 
     @staticmethod
     def _verify_hash(password: str, stored: str) -> bool:
-        """B01: Re-derive the hash and compare in constant time."""
         try:
             salt, expected = stored.split(":", 1)
         except ValueError:
@@ -681,6 +669,22 @@ class DBManager:
     # =========================================================
     # EXISTING METHODS (unchanged)
     # =========================================================
+    def get_rejections_for_file(self, file_id: str) -> List[Dict[str, Any]]:
+        sql = """
+            SELECT r.rejection_id, r.chunk_id, r.level, r.question_text,
+                   r.reason, r.semantic_score, r.rejected_at
+            FROM chunk_rejections r
+            JOIN chunks c ON r.chunk_id = c.chunk_id
+            WHERE c.file_id = ?
+            ORDER BY r.rejected_at DESC
+        """
+        try:
+            with self._connection() as con:
+                rows = con.execute(sql, (file_id,)).fetchall()
+            return [dict(r) for r in rows]
+        except Exception as e:
+            self.logger.error(f"get_rejections_for_file failed: {e}")
+            return []
 
     def save_chunks(self, file_id: str, chunks: List[Dict[str, Any]]) -> bool:
         if not chunks:

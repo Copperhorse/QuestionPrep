@@ -1,13 +1,6 @@
 """
 ingester.py
 
-Fix applied:
-  B05 - ingest() now always returns (bool, Optional[str]).
-        The bare `return False` path has been replaced with `return False, None`.
-        Previously, `batch_process` used `if ingest(...):` — a (False, None) tuple
-        is truthy in Python so failures appeared as successes. The `run_ingestion_task`
-        caller in main.py used `success, file_id = ingest(...)` which would raise
-        ValueError on the old bare `return False`.
 """
 
 import logging
